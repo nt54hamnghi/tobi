@@ -1,0 +1,21 @@
+# IDE-specific files
+/.vscode
+/.cursor
+.cursorrules
+
+# Temporary files and directories
+/tmp
+
+# Local development and testing
+/dev
+/.config
+/.legacy
+debug.log
+
+# Build output
+/summary.md
+
+# All .env files
+**/*.env
+
+# Miscellaneous system files
