@@ -6,8 +6,8 @@ tmp_dir = "tmp"
 [build]
 args_bin = []
 bin = "./tmp/main"
-# cmd = "clear; go build -o ./tmp/main ./dev/main.go"
-cmd = "clear; go build -o ./tmp/main ./main.go"
+cmd = "clear; go build -o ./tmp/main ./dev/main.go"
+# cmd = "clear; go build -o ./tmp/main ./main.go"
 exclude_dir = ["assets", "tmp", "vendor", "testdata", ".vscode"]
 include_ext = ["go", "tpl", "tmpl", "html"]
 
