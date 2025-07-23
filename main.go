@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/fang"
-	"github.com/nt54hamnghi/tag/cmd"
+	"github.com/nt54hamnghi/tobi/cmd"
 )
 
 const VERSION = "0.1.0"

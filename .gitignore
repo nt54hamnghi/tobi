@@ -12,10 +12,7 @@
 /.legacy
 debug.log
 
-# Build output
-/summary.md
-
 # All .env files
-**/*.env
+*.env
 
 # Miscellaneous system files

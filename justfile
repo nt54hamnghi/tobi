@@ -24,8 +24,8 @@ lint:
 alias l := lint
 
 completion:
-    @go run main.go completion zsh > "_tag"
-    @sudo mv _tag /usr/share/zsh/site-functions/
+    @go run main.go completion zsh > "_tobi"
+    @sudo mv _tobi /usr/share/zsh/site-functions/
 
 install: completion
     @go install .
