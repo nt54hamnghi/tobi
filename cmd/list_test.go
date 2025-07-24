@@ -155,14 +155,16 @@ func Test_listNotes(t *testing.T) {
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
 		t.Run(tt.name, func(t *testing.T) {
-			root := tt.dir.Path()
+			root, err := newDirPath(tt.dir.Path())
+			r.NoError(err)
+
 			notes, err := listNotes(root)
 			r.NoError(err)
 
 			// Convert absolute paths to relative paths for comparison
 			relPaths := make([]string, len(notes))
 			for i, path := range notes {
-				relPath, err := filepath.Rel(root, path)
+				relPath, err := filepath.Rel(root.String(), path)
 				r.NoError(err)
 				relPaths[i] = relPath
 			}
@@ -174,28 +176,6 @@ func Test_listNotes(t *testing.T) {
 			r.Equal(tt.want, relPaths)
 		})
 	}
-}
-
-func Test_listNotes_error(t *testing.T) {
-	r := require.New(t)
-
-	t.Run("non-existent directory", func(t *testing.T) {
-		result, err := listNotes("/non/existent/directory")
-
-		r.Error(err)
-		r.Nil(result)
-	})
-
-	t.Run("not a directory", func(t *testing.T) {
-		dir := fs.NewDir(t, "test",
-			fs.WithFile("not-a-dir.txt", "content"),
-		)
-
-		result, err := listNotes(dir.Path() + "/not-a-dir.txt")
-
-		r.Error(err)
-		r.Nil(result)
-	})
 }
 
 func Test_filteredGitTracked(t *testing.T) {
@@ -260,7 +240,9 @@ func Test_filteredGitTracked(t *testing.T) {
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
 		t.Run(tt.name, func(t *testing.T) {
-			root := tt.dir.Path()
+			root, err := newDirPath(tt.dir.Path())
+			r.NoError(err)
+
 			notes, err := listNotes(root)
 			r.NoError(err)
 
@@ -270,7 +252,7 @@ func Test_filteredGitTracked(t *testing.T) {
 			// Convert absolute paths to relative paths for comparison
 			relPaths := make([]string, len(filtered))
 			for i, path := range filtered {
-				relPath, err := filepath.Rel(root, path)
+				relPath, err := filepath.Rel(root.String(), path)
 				r.NoError(err)
 				relPaths[i] = relPath
 			}

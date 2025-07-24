@@ -1,9 +1,8 @@
-/*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 )
 
@@ -26,4 +25,15 @@ func addCommands(cmd *cobra.Command) {
 		NewListCmd(),
 		NewStatsCmd(),
 	)
+}
+
+// vaultPath returns the Obsidian vault path by checking the OBSIDIAN_VAULT_PATH
+// environment variable first, falling back to the current working directory.
+// Returns an error if unable to determine the current working directory.
+func vaultPath() (string, error) {
+	path, exist := os.LookupEnv("OBSIDIAN_VAULT_PATH")
+	if !exist {
+		return os.Getwd()
+	}
+	return path, nil
 }

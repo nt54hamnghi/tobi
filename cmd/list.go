@@ -19,10 +19,36 @@ import (
 
 func NewListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all tags",
+		Use:     "list [path]",
+		Short:   "List all tags",
+		Aliases: []string{"ls", "l"},
+		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("list called")
+			var path string
+
+			if len(args) == 0 {
+				if p, err := vaultPath(); err != nil {
+					return err
+				} else {
+					path = p
+				}
+			} else {
+				path = args[0]
+			}
+
+			root, err := newDirPath(path)
+			if err != nil {
+				return err
+			}
+
+			notes, err := listNotes(root)
+			if err != nil {
+				return err
+			}
+
+			notes, err = filterGitTracked(root, notes)
+
+			fmt.Println(root)
 			return nil
 		},
 	}
@@ -125,17 +151,31 @@ func extractTagsFromYAML(data []byte) ([]string, error) {
 	return fm.Tags, nil
 }
 
+// dirPath is a path to a valid directory.
+type dirPath string
+
+func newDirPath(path string) (dirPath, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	return dirPath(path), nil
+}
+
+func (d dirPath) String() string {
+	return string(d)
+}
+
 // listNotes recursively traverses the directory at root and lists all '.md' files
 // while ignoring the .git folder. It returns absolute paths to the discovered files.
 // Returns an error if the root path is not a valid directory.
-func listNotes(root string) ([]string, error) {
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", root)
-	}
-
+func listNotes(root dirPath) ([]string, error) {
 	notes := make([]string, 0, 128)
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root.String(), func(path string, d fs.DirEntry, err error) error {
 		// Skip directory entry if there's an error
 		if err != nil {
 			return nil
@@ -162,10 +202,10 @@ func listNotes(root string) ([]string, error) {
 // filterGitTracked filters the given file paths by applying .gitignore rules from
 // root and subdirectories, returning only files that should be tracked by Git.
 // Returns an error if there's an issue reading .gitignore files.
-func filterGitTracked(root string, paths []string) ([]string, error) {
+func filterGitTracked(root dirPath, paths []string) ([]string, error) {
 	filtered := make([]string, 0, len(paths))
 
-	rfs := osfs.New(root, osfs.WithBoundOS())
+	rfs := osfs.New(root.String(), osfs.WithBoundOS())
 	ps, err := gitignore.ReadPatterns(rfs, nil)
 	if err != nil {
 		return nil, err
@@ -173,7 +213,7 @@ func filterGitTracked(root string, paths []string) ([]string, error) {
 	matcher := gitignore.NewMatcher(ps)
 
 	for _, path := range paths {
-		relPath, err := filepath.Rel(root, path)
+		relPath, err := filepath.Rel(root.String(), path)
 		if err != nil {
 			return nil, err
 		}
