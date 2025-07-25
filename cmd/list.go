@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,11 +55,6 @@ func NewListCmd() *cobra.Command {
 	return cmd
 }
 
-var (
-	ErrInvalidFrontMatter = errors.New("invalid frontmatter")
-	ErrEmptyFrontMatter   = errors.New("empty frontmatter")
-)
-
 func collectTags(notes []string) []string {
 	var wg sync.WaitGroup
 
@@ -71,7 +66,7 @@ func collectTags(notes []string) []string {
 			defer wg.Done()
 			tags, err := processFile(n)
 			if err != nil {
-				// log.Printf("failed to process file %s: %v", n, err)
+				log.Printf("failed to process file %s: %v", n, err)
 				ch <- nil
 				return
 			}
@@ -99,6 +94,9 @@ func processFile(path string) ([]string, error) {
 	}
 
 	yml, err := extractFrontMatter(f)
+	if errors.Is(err, ErrEmptyFrontMatter) || errors.Is(err, ErrNoFrontMatter) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -106,66 +104,57 @@ func processFile(path string) ([]string, error) {
 	return extractTagsFromYAML([]byte(yml))
 }
 
+var (
+	ErrInvalidFrontMatter = errors.New("invalid frontmatter")
+	ErrEmptyFrontMatter   = errors.New("empty frontmatter")
+	ErrNoFrontMatter      = errors.New("no frontmatter")
+)
+
 // extractFrontMatter reads from the given reader and extracts YAML frontmatter
 // content enclosed between '---' delimiters, returning the frontmatter as a string.
 // Returns an error if delimiters are missing or frontmatter is empty.
 func extractFrontMatter(r io.Reader) (string, error) {
-	delim := "---\n"
+	sep := "---"
+
 	scanner := bufio.NewScanner(r)
-	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
+	if scanner.Scan() {
+		t := scanner.Text()
+		if !strings.HasPrefix(t, sep) {
+			return "", ErrNoFrontMatter
 		}
-
-		if i := bytes.Index(data, []byte(delim)); i >= 0 {
-			step := len(delim)
-			return i + step, data[:i+step], nil
+		if t != sep {
+			return "", ErrInvalidFrontMatter
 		}
+	}
 
-		// If we're at EOF, we have a final, non-terminated line. Return it.
-		if atEOF {
-			return len(data), data, nil
-		}
+	var (
+		s   strings.Builder
+		end bool
+	)
 
-		// Request more data.
-		return 0, nil, nil
-	})
-
-	parts := make([]string, 0, 2)
 	for scanner.Scan() {
-		if len(parts) == 2 {
+		t := scanner.Text()
+		if t == sep {
+			end = true
 			break
 		}
-
-		parts = append(parts, scanner.Text())
+		s.WriteString(t + "\n")
 	}
 
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
 
-	if len(parts) < 2 {
+	if !end {
 		return "", ErrInvalidFrontMatter
 	}
 
-	token := parts[1]
-	switch {
-	// Closing delimiter has a newline
-	case strings.HasSuffix(token, delim):
-		token = strings.TrimSuffix(token, delim)
-	// Closing delimiter has no newline
-	case strings.HasSuffix(token, delim[:3]):
-		token = strings.TrimSuffix(token, delim[:3])
-	default:
-		return "", ErrInvalidFrontMatter
-	}
-
-	token = strings.TrimSpace(token)
-	if len(token) == 0 {
+	yml := strings.TrimSpace(s.String())
+	if len(yml) == 0 {
 		return "", ErrEmptyFrontMatter
 	}
 
-	return token, nil
+	return yml, nil
 }
 
 // extractTagsFromYAML parses YAML frontmatter data and extracts the "tags" field,

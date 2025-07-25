@@ -30,8 +30,8 @@ func Test_extractFrontMatter(t *testing.T) {
 			wantErr:  nil,
 		},
 		{
-			name:     "whitespace around delimiters",
-			input:    "\n---\ntags: [one, two]\n---\n",
+			name:     "whitespace in frontmatter",
+			input:    "---\n\ntags: [one, two]\n\n---\n",
 			expected: "tags: [one, two]",
 			wantErr:  nil,
 		},
@@ -41,6 +41,11 @@ func Test_extractFrontMatter(t *testing.T) {
 			wantErr: ErrEmptyFrontMatter,
 		},
 		{
+			name:    "no frontmatter",
+			input:   "Content here",
+			wantErr: ErrNoFrontMatter,
+		},
+		{
 			name:    "no closing delimiter",
 			input:   "---\ntags: [test]",
 			wantErr: ErrInvalidFrontMatter,
@@ -48,7 +53,7 @@ func Test_extractFrontMatter(t *testing.T) {
 		{
 			name:    "no opening delimiter",
 			input:   "tags: [test]---",
-			wantErr: ErrInvalidFrontMatter,
+			wantErr: ErrNoFrontMatter,
 		},
 		{
 			name:    "no new line after opening delimiter",
@@ -60,6 +65,12 @@ func Test_extractFrontMatter(t *testing.T) {
 			input:    "---\ntags: [test]\n---",
 			expected: "tags: [test]",
 			wantErr:  nil,
+		},
+		{
+			name:     "whitespace around delimiters",
+			input:    "\n---\ntags: [one, two]\n---\n",
+			expected: "tags: [one, two]",
+			wantErr:  ErrNoFrontMatter,
 		},
 	}
 
@@ -205,9 +216,7 @@ func Test_listGitTrackedNotes(t *testing.T) {
 				fs.WithFile("note.md", "content"),
 				fs.WithDir("level1",
 					fs.WithFiles(map[string]string{
-						"note2.md":   "content",
-						"note3.md":   "content",
-						".gitignore": "note3.md",
+						"note2.md": "content",
 					}),
 				),
 			),
@@ -259,6 +268,95 @@ func Test_listGitTrackedNotes(t *testing.T) {
 			sort.Strings(tt.want)
 
 			r.Equal(tt.want, relPaths)
+		})
+	}
+}
+
+func Test_processFile(t *testing.T) {
+	testCases := []struct {
+		name    string
+		dir     *fs.Dir
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "valid frontmatter with tags",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\ntags: [golang, \"#cobra\"]\n---\nContent",
+				),
+			),
+			want: []string{"golang", "cobra"},
+		},
+		{
+			name: "no tags field",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\ntitle: Test\n---\nContent",
+				),
+			),
+			want: nil,
+		},
+		{
+			name: "empty tags array",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\ntags: []\n---\nContent",
+				),
+			),
+			want: []string{},
+		},
+		{
+			name: "no frontmatter",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "# Just content",
+				),
+			),
+			want: nil,
+		},
+		{
+			name: "empty frontmatter",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\n---\nContent",
+				),
+			),
+			want: nil,
+		},
+		{
+			name: "invalid frontmatter",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\ntags: [test]\nNo closing delimiter",
+				),
+			),
+			wantErr: true,
+		},
+		{
+			name: "invalid YAML",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(
+					"note.md", "---\ntags: [invalid: yaml\n---\nContent",
+				),
+			),
+			wantErr: true,
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		defer tt.dir.Remove()
+
+		t.Run(tt.name, func(t *testing.T) {
+			actual, err := processFile(tt.dir.Path() + "/note.md")
+			if tt.wantErr {
+				r.Error(err)
+				return
+			}
+			r.NoError(err)
+			r.Equal(tt.want, actual)
 		})
 	}
 }
