@@ -178,7 +178,7 @@ func Test_listNotes(t *testing.T) {
 	}
 }
 
-func Test_filteredGitTracked(t *testing.T) {
+func Test_listGitTrackedNotes(t *testing.T) {
 	testCases := []struct {
 		name string
 		dir  *fs.Dir
@@ -243,10 +243,7 @@ func Test_filteredGitTracked(t *testing.T) {
 			root, err := newDirPath(tt.dir.Path())
 			r.NoError(err)
 
-			notes, err := listNotes(root)
-			r.NoError(err)
-
-			filtered, err := filterGitTracked(root, notes)
+			filtered, err := listGitTrackedNotes(root)
 			r.NoError(err)
 
 			// Convert absolute paths to relative paths for comparison

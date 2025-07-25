@@ -9,7 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
@@ -24,31 +27,27 @@ func NewListCmd() *cobra.Command {
 		Aliases: []string{"ls", "l"},
 		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var path string
-
 			if len(args) == 0 {
-				if p, err := vaultPath(); err != nil {
+				p, err := defaultVaultPath()
+				if err != nil {
 					return err
-				} else {
-					path = p
 				}
-			} else {
-				path = args[0]
+				args = append(args, p)
 			}
 
-			root, err := newDirPath(path)
+			root, err := newDirPath(args[0])
 			if err != nil {
 				return err
 			}
 
-			notes, err := listNotes(root)
+			notes, err := listGitTrackedNotes(root)
 			if err != nil {
 				return err
 			}
 
-			notes, err = filterGitTracked(root, notes)
+			tags := collectTags(notes)
+			fmt.Printf("%+v", tags)
 
-			fmt.Println(root)
 			return nil
 		},
 	}
@@ -60,6 +59,38 @@ var (
 	ErrInvalidFrontMatter = errors.New("invalid frontmatter")
 	ErrEmptyFrontMatter   = errors.New("empty frontmatter")
 )
+
+func collectTags(notes []string) []string {
+	var wg sync.WaitGroup
+
+	ch := make(chan []string, len(notes))
+
+	for _, n := range notes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tags, err := processFile(n)
+			if err != nil {
+				// log.Printf("failed to process file %s: %v", n, err)
+				ch <- nil
+				return
+			}
+			ch <- tags
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	allTags := make([]string, 0, 1024)
+	for tags := range ch {
+		allTags = append(allTags, tags...)
+	}
+	sort.Strings(allTags)
+	return slices.Compact(allTags)
+}
 
 func processFile(path string) ([]string, error) {
 	f, err := os.Open(path)
@@ -148,6 +179,10 @@ func extractTagsFromYAML(data []byte) ([]string, error) {
 		return nil, err
 	}
 
+	for i := range fm.Tags {
+		fm.Tags[i] = strings.TrimPrefix(fm.Tags[i], "#")
+	}
+
 	return fm.Tags, nil
 }
 
@@ -169,8 +204,42 @@ func (d dirPath) String() string {
 	return string(d)
 }
 
+// listGitTrackedNotes finds all '.md' files in the root directory and filters them
+// based on .gitignore files in the directory. It returns only files that should be tracked by Git.
+//
+// Returns an error if unable to read files or .gitignore patterns.
+func listGitTrackedNotes(root dirPath) ([]string, error) {
+	paths, err := listNotes(root)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]string, 0, len(paths))
+
+	rfs := osfs.New(root.String(), osfs.WithBoundOS())
+	ps, err := gitignore.ReadPatterns(rfs, nil)
+	if err != nil {
+		return nil, err
+	}
+	matcher := gitignore.NewMatcher(ps)
+
+	for _, path := range paths {
+		relPath, err := filepath.Rel(root.String(), path)
+		if err != nil {
+			return nil, err
+		}
+		s := strings.Split(relPath, string(filepath.Separator))
+		if !matcher.Match(s, false) {
+			filtered = append(filtered, path)
+		}
+	}
+
+	return filtered, nil
+}
+
 // listNotes recursively traverses the directory at root and lists all '.md' files
 // while ignoring the .git folder. It returns absolute paths to the discovered files.
+//
 // Returns an error if the root path is not a valid directory.
 func listNotes(root dirPath) ([]string, error) {
 	notes := make([]string, 0, 128)
@@ -197,31 +266,4 @@ func listNotes(root dirPath) ([]string, error) {
 	}
 
 	return notes, nil
-}
-
-// filterGitTracked filters the given file paths by applying .gitignore rules from
-// root and subdirectories, returning only files that should be tracked by Git.
-// Returns an error if there's an issue reading .gitignore files.
-func filterGitTracked(root dirPath, paths []string) ([]string, error) {
-	filtered := make([]string, 0, len(paths))
-
-	rfs := osfs.New(root.String(), osfs.WithBoundOS())
-	ps, err := gitignore.ReadPatterns(rfs, nil)
-	if err != nil {
-		return nil, err
-	}
-	matcher := gitignore.NewMatcher(ps)
-
-	for _, path := range paths {
-		relPath, err := filepath.Rel(root.String(), path)
-		if err != nil {
-			return nil, err
-		}
-		s := strings.Split(relPath, string(filepath.Separator))
-		if !matcher.Match(s, false) {
-			filtered = append(filtered, path)
-		}
-	}
-
-	return filtered, nil
 }

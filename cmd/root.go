@@ -27,10 +27,10 @@ func addCommands(cmd *cobra.Command) {
 	)
 }
 
-// vaultPath returns the Obsidian vault path by checking the OBSIDIAN_VAULT_PATH
+// defaultVaultPath returns the Obsidian vault path by checking the OBSIDIAN_VAULT_PATH
 // environment variable first, falling back to the current working directory.
 // Returns an error if unable to determine the current working directory.
-func vaultPath() (string, error) {
+func defaultVaultPath() (string, error) {
 	path, exist := os.LookupEnv("OBSIDIAN_VAULT_PATH")
 	if !exist {
 		return os.Getwd()
