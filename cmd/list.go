@@ -40,12 +40,20 @@ func NewListCmd() *cobra.Command {
 				return err
 			}
 
+			isIgnored, err := readIgnoredTags(filepath.Join(root.String(), ".tobiignore"))
+			if err != nil {
+				return err
+			}
+
 			notes, err := listGitTrackedNotes(root)
 			if err != nil {
 				return err
 			}
 
 			tags := collectTags(notes)
+			tags = slices.DeleteFunc(tags, func(t string) bool {
+				return isIgnored[t]
+			})
 			fmt.Printf("%+v", tags)
 
 			return nil
@@ -53,6 +61,32 @@ func NewListCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func readIgnoredTags(ignoreFile string) (map[string]bool, error) {
+	b, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, nil
+		case errors.Is(err, fs.ErrPermission):
+			log.Printf("permission denied: %s", ignoreFile)
+			return nil, nil
+		default:
+			return nil, err
+		}
+	}
+
+	lines := make(map[string]bool)
+	for l := range strings.Lines(string(b)) {
+		l = strings.TrimSuffix(l, "\n")
+		if l == "" {
+			continue
+		}
+		lines[l] = true
+	}
+
+	return lines, nil
 }
 
 func collectTags(notes []string) []string {

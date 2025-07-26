@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -165,7 +167,7 @@ func Test_listNotes(t *testing.T) {
 	r := require.New(t)
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			root, err := newDirPath(tt.dir.Path())
 			r.NoError(err)
 
@@ -248,7 +250,7 @@ func Test_listGitTrackedNotes(t *testing.T) {
 	r := require.New(t)
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			root, err := newDirPath(tt.dir.Path())
 			r.NoError(err)
 
@@ -349,7 +351,7 @@ func Test_processFile(t *testing.T) {
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
 
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			actual, err := processFile(tt.dir.Path() + "/note.md")
 			if tt.wantErr {
 				r.Error(err)
@@ -357,6 +359,72 @@ func Test_processFile(t *testing.T) {
 			}
 			r.NoError(err)
 			r.Equal(tt.want, actual)
+		})
+	}
+}
+
+func Test_readIgnoredTags(t *testing.T) {
+	testCases := []struct {
+		name string
+		dir  *fs.Dir
+		want []string
+	}{
+		{
+			name: "single tag",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobiignore", "golang"),
+			),
+			want: []string{"golang"},
+		},
+		{
+			name: "multiple tags",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobiignore", "golang\ncobra"),
+			),
+			want: []string{"cobra", "golang"},
+		},
+		{
+			name: "duplicate tags",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobiignore", "golang\ngolang\ncobra"),
+			),
+			want: []string{"cobra", "golang"},
+		},
+		{
+			name: "duplicate empty lines",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobiignore", "golang\n\n\ncobra"),
+			),
+			want: []string{"cobra", "golang"},
+		},
+		{
+			name: "empty file",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobiignore", ""),
+			),
+			want: nil,
+		},
+		{
+			name: "file does not exist",
+			dir:  fs.NewDir(t, "test"),
+			want: nil,
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		defer tt.dir.Remove()
+
+		t.Run(tt.name, func(_ *testing.T) {
+			filePath := filepath.Join(tt.dir.Path(), ".tobiignore")
+
+			actual, err := readIgnoredTags(filePath)
+			r.NoError(err)
+
+			actualTags := slices.Collect(maps.Keys(actual))
+			sort.Strings(actualTags)
+			r.Equal(tt.want, actualTags)
 		})
 	}
 }
