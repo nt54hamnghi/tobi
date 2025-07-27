@@ -10,8 +10,10 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -24,10 +26,9 @@ import (
 
 func NewListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "list [path]",
-		Short:   "List all tags",
-		Aliases: []string{"ls", "l"},
-		Args:    cobra.RangeArgs(0, 1),
+		Use:   "tobi [path]",
+		Short: "See all tags in your Obsidian vault",
+		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				p, exist := os.LookupEnv("OBSIDIAN_VAULT_PATH")
@@ -58,20 +59,19 @@ func NewListCmd() *cobra.Command {
 			tc, err = newTagCountsFromCache(root)
 			// if cache is valid and no changes was detected, return it
 			if err == nil && tc.Hash == ns.hash {
-				fmt.Printf("%s\n", tc)
+				tc.Print()
 				return nil
 			}
 
 			// cache is stale, corrupted, or missing, compute tag counts
-			tc = newTagCounts(ns, isIgnored)
+			tc = collectTags(ns, isIgnored)
 			// write computed tag counts to cache
 			if err := tc.writeCache(root); err != nil {
 				// failing to write cache is not a fatal error, just log it
 				log.Printf("failed to write cache to %s: %v", root.cachePath(), err)
 			}
 
-			fmt.Printf("%s\n", tc)
-
+			tc.Print()
 			return nil
 		},
 	}
@@ -84,11 +84,44 @@ type tagCounts struct {
 	Hash uint64         `json:"hash"`
 }
 
-func newTagCounts(ns noteSet, ignoredTags set.Set[string]) tagCounts {
-	tags := collectTags(ns.notes).Difference(ignoredTags)
+// collectTags processes all note files concurrently and extracts tags from their
+// YAML frontmatter, filtering out ignored tags and calculating frequency counts.
+// Returns a tagCounts struct with the frequency map and vault hash.
+//
+// Files that cannot be processed due to errors are logged and skipped.
+func collectTags(ns noteSet, ignoredTags set.Set[string]) tagCounts {
+	var wg sync.WaitGroup
 
-	m := make(map[string]int, tags.Cardinality())
-	for t := range set.Elements(tags) {
+	// estimated total number of tags based on number of notes
+	est := ns.notes.Cardinality() * 8
+	// channel of tags to be collected
+	ch := make(chan string, est)
+
+	for n := range set.Elements(ns.notes) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tags, err := processFile(n)
+			if err != nil {
+				log.Printf("failed to process file %s: %v", n, err)
+				return
+			}
+			for _, t := range tags {
+				ch <- t
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	m := make(map[string]int, est)
+	for t := range ch {
+		if ignoredTags.Contains(t) {
+			continue
+		}
 		m[t]++
 	}
 	return tagCounts{
@@ -118,6 +151,7 @@ func (tc tagCounts) writeCache(root vaultPath) error {
 		return err
 	}
 	defer f.Close()
+
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "\t")
 	if err := enc.Encode(tc); err != nil {
@@ -126,13 +160,15 @@ func (tc tagCounts) writeCache(root vaultPath) error {
 	return nil
 }
 
-// TODO: clean up this function
-func (tc tagCounts) String() string {
-	b, err := json.MarshalIndent(tc, "", "\t")
-	if err != nil {
-		panic(err)
+func (tc tagCounts) Print() {
+	t := slices.SortedFunc(maps.Keys(tc.Tags), func(a, b string) int {
+		return tc.Tags[b] - tc.Tags[a]
+	})
+	for i := 0; i < min(len(t), 16); i++ {
+		tag := t[i]
+		count := tc.Tags[tag]
+		fmt.Printf("%s: %d\n", tag, count)
 	}
-	return string(b)
 }
 
 // loadIgnoredTags reads the '.tobiignore' file at root directory, which contains
@@ -168,41 +204,6 @@ func loadIgnoredTags(root vaultPath) (set.Set[string], error) {
 	}
 
 	return lines, nil
-}
-
-// collectTags processes all note files concurrently and extracts tags from their
-// YAML frontmatter, returning a deduplicated set of all discovered tags.
-//
-// Files that cannot be processed due to errors are logged and skipped.
-func collectTags(notes set.Set[string]) set.Set[string] {
-	var wg sync.WaitGroup
-
-	ch := make(chan []string, notes.Cardinality())
-
-	for n := range set.Elements(notes) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			tags, err := processFile(n)
-			if err != nil {
-				log.Printf("failed to process file %s: %v", n, err)
-				ch <- nil
-				return
-			}
-			ch <- tags
-		}()
-	}
-
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	allTags := set.NewSetWithSize[string](1024)
-	for tags := range ch {
-		allTags.Append(tags...)
-	}
-	return allTags
 }
 
 // processFile opens a file and extracts tags from its YAML frontmatter.
@@ -379,8 +380,9 @@ func listNotes(root vaultPath) (noteSet, error) {
 				return nil
 			}
 
-			h.Write([]byte(path))
-			binary.Write(h, binary.LittleEndian, info.ModTime().Unix())
+			// TODO: these 2 calls return errors, might need to handle them
+			_, _ = h.Write([]byte(path))
+			_ = binary.Write(h, binary.LittleEndian, info.ModTime().Unix())
 
 			notes.Add(path)
 		}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -391,6 +392,196 @@ func Test_readIgnoredTags(t *testing.T) {
 			r.NoError(err)
 
 			r.Equal(tt.want, set.Sorted(actual))
+		})
+	}
+}
+
+func Test_collectTags(t *testing.T) {
+	testCases := []struct {
+		name        string
+		dir         *fs.Dir
+		ignoredTags set.Set[string]
+		want        map[string]int
+	}{
+		{
+			name: "single file",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile("note1.md", "---\ntags: [golang, cobra, cli]\n---\nContent"),
+			),
+			ignoredTags: set.NewSet[string](),
+			want: map[string]int{
+				"golang": 1,
+				"cobra":  1,
+				"cli":    1,
+			},
+		},
+		{
+			name: "multiple files",
+			dir: fs.NewDir(t, "test",
+				fs.WithFiles(map[string]string{
+					"note1.md": "---\ntags: [golang, cobra]\n---\nContent",
+					"note2.md": "---\ntags: [golang, cli]\n---\nContent",
+					"note3.md": "---\ntags: [cobra]\n---\nContent",
+				}),
+			),
+			ignoredTags: set.NewSet[string](),
+			want: map[string]int{
+				"golang": 2,
+				"cobra":  2,
+				"cli":    1,
+			},
+		},
+		{
+			name: "skip files with errors",
+			dir: fs.NewDir(t, "test",
+				fs.WithFiles(map[string]string{
+					"valid.md":   "---\ntags: [golang]\n---\nContent",
+					"invalid.md": "---\ntags: [invalid: yaml\n---\nContent", // Invalid YAML
+				}),
+			),
+			ignoredTags: set.NewSet[string](),
+			want: map[string]int{
+				"golang": 1,
+			},
+		},
+		{
+			name: "ignored tags are filtered out",
+			dir: fs.NewDir(t, "test",
+				fs.WithFiles(map[string]string{
+					"note1.md": "---\ntags: [golang, cobra, daily]\n---\nContent",
+					"note2.md": "---\ntags: [golang, daily, personal]\n---\nContent",
+				}),
+			),
+			ignoredTags: set.NewSet("daily", "personal"),
+			want: map[string]int{
+				"golang": 2,
+				"cobra":  1,
+			},
+		},
+		{
+			name: "all tags ignored",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile("note1.md", "---\ntags: [daily, personal]\n---\nContent"),
+			),
+			ignoredTags: set.NewSet("daily", "personal"),
+			want:        map[string]int{},
+		},
+		{
+			name: "empty noteSet",
+			dir:  fs.NewDir(t, "test"),
+			want: map[string]int{},
+		},
+		{
+			name: "hash prefix removal",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile("note1.md", "---\ntags: [\"#golang\", golang]\n---\nContent"),
+			),
+			ignoredTags: set.NewSet[string](),
+			want: map[string]int{
+				"golang": 2,
+			},
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		defer tt.dir.Remove()
+
+		t.Run(tt.name, func(_ *testing.T) {
+			// Create noteSet from test directory
+			root, err := newVaultPath(tt.dir.Path())
+			r.NoError(err)
+			ns, err := listNotes(root)
+			r.NoError(err)
+
+			// Test collectTags
+			result := collectTags(ns, tt.ignoredTags)
+
+			// Verify results
+			r.Equal(tt.want, result.Tags)
+			r.Equal(ns.hash, result.Hash) // Hash should be preserved
+		})
+	}
+}
+
+func Test_newTagCountsFromCache(t *testing.T) {
+	testCases := []struct {
+		name string
+		dir  *fs.Dir
+		want tagCounts
+	}{
+		{
+			name: "reads from .tobi.json",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile(".tobi.json", `{"tags":{"golang":5,"cobra":3},"hash":12345678901234567890}`),
+			),
+			want: tagCounts{
+				Tags: map[string]int{
+					"golang": 5,
+					"cobra":  3,
+				},
+				Hash: 12345678901234567890,
+			},
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		defer tt.dir.Remove()
+
+		t.Run(tt.name, func(_ *testing.T) {
+			root, err := newVaultPath(tt.dir.Path())
+			r.NoError(err)
+
+			result, err := newTagCountsFromCache(root)
+			r.NoError(err)
+
+			r.Equal(tt.want, result)
+		})
+	}
+}
+
+func Test_tagCounts_writeCache(t *testing.T) {
+	testCases := []struct {
+		name      string
+		tagCounts tagCounts
+		wantJSON  string
+	}{
+		{
+			name: "writes to .tobi.json with proper formatting",
+			tagCounts: tagCounts{
+				Tags: map[string]int{
+					"golang": 5,
+					"cobra":  3,
+				},
+				Hash: 12345678901234567890,
+			},
+			wantJSON: "{\n\t\"tags\": {\n\t\t\"cobra\": 3,\n\t\t\"golang\": 5\n\t},\n\t\"hash\": 12345678901234567890\n}\n",
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(_ *testing.T) {
+			dir := fs.NewDir(t, "test")
+			defer dir.Remove()
+
+			root, err := newVaultPath(dir.Path())
+			r.NoError(err)
+
+			// Write cache
+			err = tt.tagCounts.writeCache(root)
+			r.NoError(err)
+
+			// Verify file was created at correct location
+			content, err := os.ReadFile(root.cachePath())
+			r.NoError(err)
+
+			// Verify JSON content matches expected format
+			r.Equal(tt.wantJSON, string(content))
 		})
 	}
 }
