@@ -24,7 +24,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type rootOptions struct {
+	noCache bool
+}
+
 func NewRootCmd() *cobra.Command {
+	var opts rootOptions
+
 	cmd := &cobra.Command{
 		Use:   "tobi [path]",
 		Short: "See all tags in your Obsidian vault",
@@ -55,16 +61,20 @@ func NewRootCmd() *cobra.Command {
 
 			var tc tagCounts
 
-			// try to read cache
-			tc, err = newTagCountsFromCache(root)
-			// if cache is valid and no changes was detected, return it
-			if err == nil && tc.Hash == ns.hash {
-				tc.Print()
-				return nil
+			if !opts.noCache {
+				// try to read cache
+				tc, err = newTagCountsFromCache(root)
+				// if cache is valid and no changes was detected, return it
+				if err == nil && tc.Hash == ns.hash {
+					tc.Print()
+					return nil
+				}
 			}
 
-			// cache is stale, corrupted, or missing, compute tag counts
+			// cache is disabled or cache file is stale, corrupted, or missing
+			// compute tag counts
 			tc = collectTags(ns, isIgnored)
+
 			// write computed tag counts to cache
 			if err := tc.writeCache(root); err != nil {
 				// failing to write cache is not a fatal error, just log it
@@ -75,6 +85,10 @@ func NewRootCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	flags := cmd.Flags()
+	flags.SortFlags = false
+	flags.BoolVarP(&opts.noCache, "no-cache", "n", false, "disable cache")
 
 	return cmd
 }
