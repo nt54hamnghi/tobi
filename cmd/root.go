@@ -22,11 +22,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
+	"github.com/thediveo/enumflag/v2"
 )
 
 type rootOptions struct {
-	limit   int
-	noCache bool
+	limit       int
+	noCache     bool
+	displayMode displayMode
 }
 
 func NewRootCmd() *cobra.Command {
@@ -90,7 +92,16 @@ func NewRootCmd() *cobra.Command {
 	flags := cmd.Flags()
 	flags.SortFlags = false
 	flags.IntVarP(&opts.limit, "limit", "l", 8, "number of tags to display. Negative values mean all.")
+	flags.VarP(
+		enumflag.New(&opts.displayMode, "mode", displayModeIDs, enumflag.EnumCaseSensitive),
+		"mode", "m", "display mode (name|count)",
+	)
 	flags.BoolVarP(&opts.noCache, "no-cache", "n", false, "disable cache")
+
+	// set up completion for display mode flag
+	if err := cmd.RegisterFlagCompletionFunc("mode", completeDisplayModeFlag); err != nil {
+		os.Exit(1)
+	}
 
 	return cmd
 }
@@ -190,8 +201,13 @@ func (tc tagCounts) Print(opts rootOptions) {
 
 	for i := 0; i < limit; i++ {
 		tag := t[i]
-		count := tc.Tags[tag]
-		fmt.Printf("%s: %d\n", tag, count)
+		switch opts.displayMode {
+		case name:
+			fmt.Println(tag)
+		case count:
+			count := tc.Tags[tag]
+			fmt.Printf("%s: %d\n", tag, count)
+		}
 	}
 }
 
