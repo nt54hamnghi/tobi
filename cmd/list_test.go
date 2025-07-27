@@ -1,13 +1,12 @@
 package cmd
 
 import (
-	"maps"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	set "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/fs"
 )
@@ -162,41 +161,6 @@ func Test_listNotes(t *testing.T) {
 			dir:  fs.NewDir(t, "test"),
 			want: []string{},
 		},
-	}
-
-	r := require.New(t)
-	for _, tt := range testCases {
-		defer tt.dir.Remove()
-		t.Run(tt.name, func(_ *testing.T) {
-			root, err := newDirPath(tt.dir.Path())
-			r.NoError(err)
-
-			notes, err := listNotes(root)
-			r.NoError(err)
-
-			// Convert absolute paths to relative paths for comparison
-			relPaths := make([]string, len(notes))
-			for i, path := range notes {
-				relPath, err := filepath.Rel(root.String(), path)
-				r.NoError(err)
-				relPaths[i] = relPath
-			}
-
-			// Sort both slices for reliable comparison
-			sort.Strings(relPaths)
-			sort.Strings(tt.want)
-
-			r.Equal(tt.want, relPaths)
-		})
-	}
-}
-
-func Test_listGitTrackedNotes(t *testing.T) {
-	testCases := []struct {
-		name string
-		dir  *fs.Dir
-		want []string
-	}{
 		{
 			name: "root .gitignore",
 			dir: fs.NewDir(t, "test",
@@ -247,19 +211,22 @@ func Test_listGitTrackedNotes(t *testing.T) {
 			want: []string{"note.md", "level2/note3.md"},
 		},
 	}
+
 	r := require.New(t)
 	for _, tt := range testCases {
 		defer tt.dir.Remove()
+
 		t.Run(tt.name, func(_ *testing.T) {
 			root, err := newDirPath(tt.dir.Path())
 			r.NoError(err)
 
-			filtered, err := listGitTrackedNotes(root)
+			ns, err := listNotes(root)
 			r.NoError(err)
 
 			// Convert absolute paths to relative paths for comparison
-			relPaths := make([]string, len(filtered))
-			for i, path := range filtered {
+			notes := set.Sorted(ns.notes)
+			relPaths := make([]string, len(notes))
+			for i, path := range notes {
 				relPath, err := filepath.Rel(root.String(), path)
 				r.NoError(err)
 				relPaths[i] = relPath
@@ -402,12 +369,12 @@ func Test_readIgnoredTags(t *testing.T) {
 			dir: fs.NewDir(t, "test",
 				fs.WithFile(".tobiignore", ""),
 			),
-			want: nil,
+			want: []string{},
 		},
 		{
 			name: "file does not exist",
 			dir:  fs.NewDir(t, "test"),
-			want: nil,
+			want: []string{},
 		},
 	}
 
@@ -422,9 +389,7 @@ func Test_readIgnoredTags(t *testing.T) {
 			actual, err := loadIgnoredTags(filePath)
 			r.NoError(err)
 
-			actualTags := slices.Collect(maps.Keys(actual))
-			sort.Strings(actualTags)
-			r.Equal(tt.want, actualTags)
+			r.Equal(tt.want, set.Sorted(actual))
 		})
 	}
 }

@@ -4,6 +4,7 @@ go 1.24.5
 
 require (
 	github.com/charmbracelet/fang v0.3.0
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.2
 	github.com/goccy/go-yaml v1.18.0

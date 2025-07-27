@@ -2,18 +2,19 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
 
+	set "github.com/deckarep/golang-set/v2"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/goccy/go-yaml"
@@ -45,16 +46,15 @@ func NewListCmd() *cobra.Command {
 				return err
 			}
 
-			notes, err := listGitTrackedNotes(root)
+			ns, err := listNotes(root)
 			if err != nil {
 				return err
 			}
 
-			tags := collectTags(notes)
-			tags = slices.DeleteFunc(tags, func(t string) bool {
-				return isIgnored[t]
-			})
-			fmt.Printf("%+v", tags)
+			tags := collectTags(ns.notes).Difference(isIgnored)
+
+			fmt.Printf("%+v\n", tags)
+			fmt.Printf("%d\n", ns.hash)
 
 			return nil
 		},
@@ -63,38 +63,39 @@ func NewListCmd() *cobra.Command {
 	return cmd
 }
 
-func loadIgnoredTags(ignoreFile string) (map[string]bool, error) {
+func loadIgnoredTags(ignoreFile string) (set.Set[string], error) {
+	lines := set.NewSet[string]()
+
 	b, err := os.ReadFile(ignoreFile)
 	if err != nil {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			return nil, nil
+			return lines, nil
 		case errors.Is(err, fs.ErrPermission):
 			log.Printf("permission denied: %s", ignoreFile)
-			return nil, nil
+			return lines, nil
 		default:
 			return nil, err
 		}
 	}
 
-	lines := make(map[string]bool)
 	for l := range strings.Lines(string(b)) {
 		l = strings.TrimSuffix(l, "\n")
 		if l == "" {
 			continue
 		}
-		lines[l] = true
+		lines.Add(l)
 	}
 
 	return lines, nil
 }
 
-func collectTags(notes []string) []string {
+func collectTags(notes set.Set[string]) set.Set[string] {
 	var wg sync.WaitGroup
 
-	ch := make(chan []string, len(notes))
+	ch := make(chan []string, notes.Cardinality())
 
-	for _, n := range notes {
+	for n := range set.Elements(notes) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -113,12 +114,11 @@ func collectTags(notes []string) []string {
 		close(ch)
 	}()
 
-	allTags := make([]string, 0, 1024)
+	allTags := set.NewSetWithSize[string](1024)
 	for tags := range ch {
-		allTags = append(allTags, tags...)
+		allTags.Append(tags...)
 	}
-	sort.Strings(allTags)
-	return slices.Compact(allTags)
+	return allTags
 }
 
 func processFile(path string) ([]string, error) {
@@ -227,47 +227,24 @@ func (d dirPath) String() string {
 	return string(d)
 }
 
-// listGitTrackedNotes finds all '.md' files in the root directory and filters them
-// based on .gitignore files in the directory. It returns only files that should be tracked by Git.
-//
-// Returns an error if unable to read files or .gitignore patterns.
-func listGitTrackedNotes(root dirPath) ([]string, error) {
-	paths, err := listNotes(root)
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := make([]string, 0, len(paths))
-
-	rfs := osfs.New(root.String(), osfs.WithBoundOS())
-	ps, err := gitignore.ReadPatterns(rfs, nil)
-	if err != nil {
-		return nil, err
-	}
-	matcher := gitignore.NewMatcher(ps)
-
-	for _, path := range paths {
-		relPath, err := filepath.Rel(root.String(), path)
-		if err != nil {
-			return nil, err
-		}
-		s := strings.Split(relPath, string(filepath.Separator))
-		if !matcher.Match(s, false) {
-			filtered = append(filtered, path)
-		}
-	}
-
-	return filtered, nil
+type noteSet struct {
+	notes set.Set[string]
+	hash  uint64
 }
 
 // listNotes recursively traverses the directory at root and lists all '.md' files
 // while ignoring the .git folder. It returns absolute paths to the discovered files.
 //
 // Returns an error if the root path is not a valid directory.
-func listNotes(root dirPath) ([]string, error) {
-	notes := make([]string, 0, 128)
+func listNotes(root dirPath) (noteSet, error) {
+	h := fnv.New64a()
+	m, err := newGitIgnoredMatcher(root)
+	if err != nil {
+		return noteSet{}, err
+	}
 
-	err := filepath.WalkDir(root.String(), func(path string, d fs.DirEntry, err error) error {
+	notes := set.NewSet[string]()
+	err = filepath.WalkDir(root.String(), func(path string, d fs.DirEntry, err error) error {
 		// Skip directory entry if there's an error
 		if err != nil {
 			return nil
@@ -279,14 +256,65 @@ func listNotes(root dirPath) ([]string, error) {
 		}
 
 		if d.Type().IsRegular() && filepath.Ext(path) == ".md" {
-			notes = append(notes, path)
+			// matchFile will returns an error if the path can't be made relative to root.
+			// However, this is not possible in WalkDir, so ignoring error is safe.
+			skip, _ := m.matchFile(path)
+			if skip {
+				return nil
+			}
+
+			info, err := d.Info()
+			// Skip files where we can't get info. Info() returns fs.ErrNotExist if the file
+			// has been removed or renamed since the directory read. Since we're only reading
+			// (not modifying files), this should never happen. However, we log the error
+			// as a safeguard to warn anyone against accidentally modifying files during traversal.
+			if err != nil {
+				log.Printf("failed to get file info for %s: %v", path, err)
+				return nil
+			}
+
+			h.Write([]byte(path))
+			binary.Write(h, binary.LittleEndian, info.ModTime().Unix())
+
+			notes.Add(path)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return noteSet{}, err
 	}
 
-	return notes, nil
+	return noteSet{
+		notes: notes,
+		hash:  h.Sum64(),
+	}, nil
+}
+
+type gitignoreMatcher struct {
+	gitignore.Matcher
+	root dirPath
+}
+
+func newGitIgnoredMatcher(root dirPath) (gitignoreMatcher, error) {
+	rfs := osfs.New(root.String(), osfs.WithBoundOS())
+
+	ps, err := gitignore.ReadPatterns(rfs, nil)
+	if err != nil {
+		return gitignoreMatcher{}, err
+	}
+
+	return gitignoreMatcher{
+		gitignore.NewMatcher(ps),
+		root,
+	}, nil
+}
+
+func (m *gitignoreMatcher) matchFile(absPath string) (bool, error) {
+	relPath, err := filepath.Rel(m.root.String(), absPath)
+	if err != nil {
+		return false, err
+	}
+	s := strings.Split(relPath, string(filepath.Separator))
+	return m.Match(s, false), nil
 }
