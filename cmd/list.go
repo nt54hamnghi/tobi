@@ -36,12 +36,12 @@ func NewListCmd() *cobra.Command {
 				args = append(args, p)
 			}
 
-			root, err := newDirPath(args[0])
+			root, err := newVaultPath(args[0])
 			if err != nil {
 				return err
 			}
 
-			isIgnored, err := loadIgnoredTags(filepath.Join(root.String(), ".tobiignore"))
+			isIgnored, err := loadIgnoredTags(root)
 			if err != nil {
 				return err
 			}
@@ -63,8 +63,16 @@ func NewListCmd() *cobra.Command {
 	return cmd
 }
 
-func loadIgnoredTags(ignoreFile string) (set.Set[string], error) {
+// loadIgnoredTags reads the '.tobiignore' file at root directory, which contains
+// tag names to ignore, one per line. Empty lines are skipped and duplicate entries
+// are removed.
+//
+// Returns an empty set if the file doesn't exist or cannot be read due to permissions.
+//
+// Returns an error for other file system issues.
+func loadIgnoredTags(root vaultPath) (set.Set[string], error) {
 	lines := set.NewSet[string]()
+	ignoreFile := root.ignorePath()
 
 	b, err := os.ReadFile(ignoreFile)
 	if err != nil {
@@ -90,6 +98,10 @@ func loadIgnoredTags(ignoreFile string) (set.Set[string], error) {
 	return lines, nil
 }
 
+// collectTags processes all note files concurrently and extracts tags from their
+// YAML frontmatter, returning a deduplicated set of all discovered tags.
+//
+// Files that cannot be processed due to errors are logged and skipped.
 func collectTags(notes set.Set[string]) set.Set[string] {
 	var wg sync.WaitGroup
 
@@ -121,6 +133,10 @@ func collectTags(notes set.Set[string]) set.Set[string] {
 	return allTags
 }
 
+// processFile opens a file and extracts tags from its YAML frontmatter.
+// Returns nil (without error) if the file has no frontmatter or empty frontmatter.
+//
+// Returns an error if the file cannot be opened, frontmatter is invalid, or YAML parsing fails.
 func processFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -146,6 +162,7 @@ var (
 
 // extractFrontMatter reads from the given reader and extracts YAML frontmatter
 // content enclosed between '---' delimiters, returning the frontmatter as a string.
+//
 // Returns an error if delimiters are missing or frontmatter is empty.
 func extractFrontMatter(r io.Reader) (string, error) {
 	sep := "---"
@@ -192,7 +209,9 @@ func extractFrontMatter(r io.Reader) (string, error) {
 }
 
 // extractTagsFromYAML parses YAML frontmatter data and extracts the "tags" field,
-// returning the tags as a slice of strings. Returns an error if the YAML is invalid.
+// returning the tags as a slice of strings.
+//
+// Returns an error if the YAML is invalid.
 func extractTagsFromYAML(data []byte) ([]string, error) {
 	var fm struct {
 		Tags []string `yaml:"tags"`
@@ -209,10 +228,10 @@ func extractTagsFromYAML(data []byte) ([]string, error) {
 	return fm.Tags, nil
 }
 
-// dirPath is a path to a valid directory.
-type dirPath string
+// vaultPath is a path to a valid directory.
+type vaultPath string
 
-func newDirPath(path string) (dirPath, error) {
+func newVaultPath(path string) (vaultPath, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -220,23 +239,34 @@ func newDirPath(path string) (dirPath, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", path)
 	}
-	return dirPath(path), nil
+	return vaultPath(path), nil
 }
 
-func (d dirPath) String() string {
-	return string(d)
+func (v vaultPath) String() string {
+	return string(v)
 }
 
+func (v vaultPath) ignorePath() string {
+	return filepath.Join(v.String(), ".tobiignore")
+}
+
+// noteSet represents a collection of discovered note files with cache validation.
+// The hash field is calculated from file paths and modification times to detect
+// changes in the vault for cache invalidation.
 type noteSet struct {
 	notes set.Set[string]
 	hash  uint64
 }
 
-// listNotes recursively traverses the directory at root and lists all '.md' files
-// while ignoring the .git folder. It returns absolute paths to the discovered files.
+// listNotes recursively traverses the directory at root and discovers all '.md' files
+// that should be tracked, filtering out files ignored by .gitignore patterns and
+// skipping the .git directory. It returns a noteSet containing the discovered files
+// and a hash calculated from file paths and modification times for cache validation.
 //
-// Returns an error if the root path is not a valid directory.
-func listNotes(root dirPath) (noteSet, error) {
+// Files that cannot be accessed for file info are logged and skipped.
+//
+// Returns an error if the root path is invalid or .gitignore patterns cannot be read.
+func listNotes(root vaultPath) (noteSet, error) {
 	h := fnv.New64a()
 	m, err := newGitIgnoredMatcher(root)
 	if err != nil {
@@ -291,12 +321,18 @@ func listNotes(root dirPath) (noteSet, error) {
 	}, nil
 }
 
+// gitignoreMatcher wraps a gitignore.Matcher with root directory context
+// to enable matching files by their absolute paths against .gitignore patterns.
 type gitignoreMatcher struct {
 	gitignore.Matcher
-	root dirPath
+	root vaultPath
 }
 
-func newGitIgnoredMatcher(root dirPath) (gitignoreMatcher, error) {
+// newGitIgnoredMatcher creates a gitignoreMatcher by reading .gitignore patterns
+// from the specified root directory and its subdirectories recursively.
+//
+// Returns an error if .gitignore patterns cannot be read.
+func newGitIgnoredMatcher(root vaultPath) (gitignoreMatcher, error) {
 	rfs := osfs.New(root.String(), osfs.WithBoundOS())
 
 	ps, err := gitignore.ReadPatterns(rfs, nil)
@@ -310,6 +346,10 @@ func newGitIgnoredMatcher(root dirPath) (gitignoreMatcher, error) {
 	}, nil
 }
 
+// matchFile checks if an absolute file path should be ignored based on .gitignore patterns.
+// Converts the absolute path to a path relative to the root directory before matching.
+//
+// Returns an error if the absolute path cannot be made relative to the root directory.
 func (m *gitignoreMatcher) matchFile(absPath string) (bool, error) {
 	relPath, err := filepath.Rel(m.root.String(), absPath)
 	if err != nil {

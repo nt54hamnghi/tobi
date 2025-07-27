@@ -217,7 +217,7 @@ func Test_listNotes(t *testing.T) {
 		defer tt.dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			root, err := newDirPath(tt.dir.Path())
+			root, err := newVaultPath(tt.dir.Path())
 			r.NoError(err)
 
 			ns, err := listNotes(root)
@@ -384,9 +384,10 @@ func Test_readIgnoredTags(t *testing.T) {
 		defer tt.dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			filePath := filepath.Join(tt.dir.Path(), ".tobiignore")
+			root, err := newVaultPath(tt.dir.Path())
+			r.NoError(err)
 
-			actual, err := loadIgnoredTags(filePath)
+			actual, err := loadIgnoredTags(root)
 			r.NoError(err)
 
 			r.Equal(tt.want, set.Sorted(actual))
