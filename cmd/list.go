@@ -28,9 +28,9 @@ func NewListCmd() *cobra.Command {
 		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				p, err := defaultVaultPath()
-				if err != nil {
-					return err
+				p, exist := os.LookupEnv("OBSIDIAN_VAULT_PATH")
+				if !exist {
+					return fmt.Errorf("path not provided and OBSIDIAN_VAULT_PATH is not set")
 				}
 				args = append(args, p)
 			}
@@ -40,7 +40,7 @@ func NewListCmd() *cobra.Command {
 				return err
 			}
 
-			isIgnored, err := readIgnoredTags(filepath.Join(root.String(), ".tobiignore"))
+			isIgnored, err := loadIgnoredTags(filepath.Join(root.String(), ".tobiignore"))
 			if err != nil {
 				return err
 			}
@@ -63,7 +63,7 @@ func NewListCmd() *cobra.Command {
 	return cmd
 }
 
-func readIgnoredTags(ignoreFile string) (map[string]bool, error) {
+func loadIgnoredTags(ignoreFile string) (map[string]bool, error) {
 	b, err := os.ReadFile(ignoreFile)
 	if err != nil {
 		switch {

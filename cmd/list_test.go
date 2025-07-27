@@ -419,7 +419,7 @@ func Test_readIgnoredTags(t *testing.T) {
 		t.Run(tt.name, func(_ *testing.T) {
 			filePath := filepath.Join(tt.dir.Path(), ".tobiignore")
 
-			actual, err := readIgnoredTags(filePath)
+			actual, err := loadIgnoredTags(filePath)
 			r.NoError(err)
 
 			actualTags := slices.Collect(maps.Keys(actual))
