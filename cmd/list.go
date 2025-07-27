@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -51,16 +52,87 @@ func NewListCmd() *cobra.Command {
 				return err
 			}
 
-			tags := collectTags(ns.notes).Difference(isIgnored)
+			var tc tagCounts
 
-			fmt.Printf("%+v\n", tags)
-			fmt.Printf("%d\n", ns.hash)
+			// try to read cache
+			tc, err = newTagCountsFromCache(root)
+			// if cache is valid and no changes was detected, return it
+			if err == nil && tc.Hash == ns.hash {
+				fmt.Printf("%s\n", tc)
+				return nil
+			}
+
+			// cache is stale, corrupted, or missing, compute tag counts
+			tc = newTagCounts(ns, isIgnored)
+			// write computed tag counts to cache
+			if err := tc.writeCache(root); err != nil {
+				// failing to write cache is not a fatal error, just log it
+				log.Printf("failed to write cache to %s: %v", root.cachePath(), err)
+			}
+
+			fmt.Printf("%s\n", tc)
 
 			return nil
 		},
 	}
 
 	return cmd
+}
+
+type tagCounts struct {
+	Tags map[string]int `json:"tags"`
+	Hash uint64         `json:"hash"`
+}
+
+func newTagCounts(ns noteSet, ignoredTags set.Set[string]) tagCounts {
+	tags := collectTags(ns.notes).Difference(ignoredTags)
+
+	m := make(map[string]int, tags.Cardinality())
+	for t := range set.Elements(tags) {
+		m[t]++
+	}
+	return tagCounts{
+		Tags: m,
+		Hash: ns.hash,
+	}
+}
+
+func newTagCountsFromCache(root vaultPath) (tagCounts, error) {
+	var tc tagCounts
+
+	dataFile := root.cachePath()
+	f, err := os.Open(dataFile)
+	if err != nil {
+		return tc, err
+	}
+	d := json.NewDecoder(f)
+	if err := d.Decode(&tc); err != nil {
+		return tc, err
+	}
+	return tc, nil
+}
+
+func (tc tagCounts) writeCache(root vaultPath) error {
+	f, err := os.OpenFile(root.cachePath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "\t")
+	if err := enc.Encode(tc); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TODO: clean up this function
+func (tc tagCounts) String() string {
+	b, err := json.MarshalIndent(tc, "", "\t")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // loadIgnoredTags reads the '.tobiignore' file at root directory, which contains
@@ -80,7 +152,7 @@ func loadIgnoredTags(root vaultPath) (set.Set[string], error) {
 		case errors.Is(err, fs.ErrNotExist):
 			return lines, nil
 		case errors.Is(err, fs.ErrPermission):
-			log.Printf("permission denied: %s", ignoreFile)
+			log.Printf("permission denied to read %s", ignoreFile)
 			return lines, nil
 		default:
 			return nil, err
@@ -248,6 +320,10 @@ func (v vaultPath) String() string {
 
 func (v vaultPath) ignorePath() string {
 	return filepath.Join(v.String(), ".tobiignore")
+}
+
+func (v vaultPath) cachePath() string {
+	return filepath.Join(v.String(), ".tobi.json")
 }
 
 // noteSet represents a collection of discovered note files with cache validation.
