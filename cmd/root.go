@@ -25,6 +25,7 @@ import (
 )
 
 type rootOptions struct {
+	limit   int
 	noCache bool
 }
 
@@ -66,7 +67,7 @@ func NewRootCmd() *cobra.Command {
 				tc, err = newTagCountsFromCache(root)
 				// if cache is valid and no changes was detected, return it
 				if err == nil && tc.Hash == ns.hash {
-					tc.Print()
+					tc.Print(opts)
 					return nil
 				}
 			}
@@ -81,13 +82,14 @@ func NewRootCmd() *cobra.Command {
 				log.Printf("failed to write cache to %s: %v", root.cachePath(), err)
 			}
 
-			tc.Print()
+			tc.Print(opts)
 			return nil
 		},
 	}
 
 	flags := cmd.Flags()
 	flags.SortFlags = false
+	flags.IntVarP(&opts.limit, "limit", "l", 8, "number of tags to display. Negative values mean all.")
 	flags.BoolVarP(&opts.noCache, "no-cache", "n", false, "disable cache")
 
 	return cmd
@@ -174,11 +176,19 @@ func (tc tagCounts) writeCache(root vaultPath) error {
 	return nil
 }
 
-func (tc tagCounts) Print() {
+func (tc tagCounts) Print(opts rootOptions) {
 	t := slices.SortedFunc(maps.Keys(tc.Tags), func(a, b string) int {
 		return tc.Tags[b] - tc.Tags[a]
 	})
-	for i := 0; i < min(len(t), 16); i++ {
+
+	var limit int
+	if opts.limit < 0 {
+		limit = len(t)
+	} else {
+		limit = min(len(t), opts.limit)
+	}
+
+	for i := 0; i < limit; i++ {
 		tag := t[i]
 		count := tc.Tags[tag]
 		fmt.Printf("%s: %d\n", tag, count)
