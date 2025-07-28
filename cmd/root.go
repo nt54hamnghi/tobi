@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"text/tabwriter"
 
 	set "github.com/deckarep/golang-set/v2"
 	"github.com/goccy/go-yaml"
@@ -228,15 +229,18 @@ func (tc tagCounts) Print(opts rootOptions) {
 		limit = min(len(t), opts.limit)
 	}
 
-	for i := 0; i < limit; i++ {
-		tag := t[i]
-		switch opts.displayMode {
-		case name:
-			fmt.Println(tag)
-		case count:
-			count := tc.Tags[tag]
-			fmt.Printf("%s: %d\n", tag, count)
+	switch opts.displayMode {
+	case name:
+		for i := 0; i < limit; i++ {
+			fmt.Println(t[i])
 		}
+	case count:
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		for i := 0; i < limit; i++ {
+			count := tc.Tags[t[i]]
+			fmt.Fprintf(w, "%d\t%s\n", count, t[i])
+		}
+		w.Flush()
 	}
 }
 
