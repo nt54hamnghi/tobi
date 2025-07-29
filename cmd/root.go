@@ -18,9 +18,8 @@ import (
 	"sync"
 
 	set "github.com/deckarep/golang-set/v2"
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/goccy/go-yaml"
+	"github.com/nt54hamnghi/tobi/pkg/gitignore"
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 )
@@ -385,27 +384,33 @@ type noteSet struct {
 // Returns an error if the root path is invalid or .gitignore patterns cannot be read.
 func listNotes(root vaultPath) (noteSet, error) {
 	h := fnv.New64a()
-	m, err := newGitIgnoredMatcher(root)
+
+	absRoot, err := gitignore.NewAbsolutePath(string(root))
+	if err != nil {
+		return noteSet{}, err
+	}
+
+	m, err := gitignore.NewRepoRootMatcher(absRoot)
 	if err != nil {
 		return noteSet{}, err
 	}
 
 	notes := set.NewSet[string]()
-	err = filepath.WalkDir(root.String(), func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(absRoot.String(), func(path string, d fs.DirEntry, err error) error {
 		// Skip directory entry if there's an error
 		if err != nil {
 			return nil
 		}
 
 		// Skip .git directory
-		if d.Name() == ".git" {
+		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
 
 		if d.Type().IsRegular() && filepath.Ext(path) == ".md" {
-			// matchFile will returns an error if the path can't be made relative to root.
-			// However, this is not possible in WalkDir, so ignoring error is safe.
-			skip, _ := m.matchFile(path)
+			// Since root is absolute when we pass it to WalkDir, path is absolute.
+			// It's safe to construct AbsolutePath directly from path.
+			skip := m.MatchFile(gitignore.NewAbsolutePathUnchecked(path))
 			if skip {
 				return nil
 			}
@@ -437,42 +442,4 @@ func listNotes(root vaultPath) (noteSet, error) {
 		notes: notes,
 		hash:  h.Sum64(),
 	}, nil
-}
-
-// gitignoreMatcher wraps a gitignore.Matcher with root directory context
-// to enable matching files by their absolute paths against .gitignore patterns.
-type gitignoreMatcher struct {
-	gitignore.Matcher
-	root vaultPath
-}
-
-// newGitIgnoredMatcher creates a gitignoreMatcher by reading .gitignore patterns
-// from the specified root directory and its subdirectories recursively.
-//
-// Returns an error if .gitignore patterns cannot be read.
-func newGitIgnoredMatcher(root vaultPath) (gitignoreMatcher, error) {
-	rfs := osfs.New(root.String(), osfs.WithBoundOS())
-
-	ps, err := gitignore.ReadPatterns(rfs, nil)
-	if err != nil {
-		return gitignoreMatcher{}, err
-	}
-
-	return gitignoreMatcher{
-		gitignore.NewMatcher(ps),
-		root,
-	}, nil
-}
-
-// matchFile checks if an absolute file path should be ignored based on .gitignore patterns.
-// Converts the absolute path to a path relative to the root directory before matching.
-//
-// Returns an error if the absolute path cannot be made relative to the root directory.
-func (m *gitignoreMatcher) matchFile(absPath string) (bool, error) {
-	relPath, err := filepath.Rel(m.root.String(), absPath)
-	if err != nil {
-		return false, err
-	}
-	s := strings.Split(relPath, string(filepath.Separator))
-	return m.Match(s, false), nil
 }

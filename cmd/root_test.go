@@ -320,7 +320,7 @@ func Test_processFile(t *testing.T) {
 		defer tt.dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			actual, err := processFile(tt.dir.Path() + "/note.md")
+			actual, err := processFile(filepath.Join(tt.dir.Path(), "note.md"))
 			if tt.wantErr {
 				r.Error(err)
 				return
