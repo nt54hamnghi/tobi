@@ -8,7 +8,7 @@ import (
 	"github.com/nt54hamnghi/tobi/cmd"
 )
 
-const VERSION = "0.1.0"
+const VERSION = "0.1.1"
 
 func main() {
 	c := cmd.NewRootCmd()

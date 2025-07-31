@@ -37,6 +37,21 @@ func NewRootCmd() *cobra.Command {
 		Use:   "tobi [path]",
 		Short: "See all tags in your Obsidian vault",
 		Args:  cobra.RangeArgs(0, 1),
+		Example: `
+		# list all tags in a vault directory
+		tobi /path/to/your/vault
+
+		# list the top 5 most used tags (with counts)
+		tobi . --limit 5 --mode count
+		`,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			// nothing has been provided, offer subcommands AND fall back to files
+			if len(args) == 0 {
+				return subcommands(cmd), cobra.ShellCompDirectiveDefault
+			}
+
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				p, exist := os.LookupEnv("OBSIDIAN_VAULT_PATH")
@@ -46,7 +61,12 @@ func NewRootCmd() *cobra.Command {
 				args = append(args, p)
 			}
 
-			root, err := newVaultPath(args[0])
+			p, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+
+			root, err := newVaultPath(p)
 			if err != nil {
 				return err
 			}
@@ -103,6 +123,16 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func subcommands(cmd *cobra.Command) []string {
+	var subs []string
+	for _, c := range cmd.Commands() {
+		if !c.Hidden {
+			subs = append(subs, c.Name())
+		}
+	}
+	return subs
 }
 
 type tagCounts struct {
