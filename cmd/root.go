@@ -114,7 +114,7 @@ func NewRootCmd() *cobra.Command {
 	flags.IntVarP(&opts.limit, "limit", "l", 8, "number of tags to display. Negative values mean all.")
 	flags.VarP(
 		enumflag.New(&opts.displayMode, "mode", displayModeIDs, enumflag.EnumCaseSensitive),
-		"mode", "m", "display mode (name|count)",
+		"mode", "m", displayModeUsage(),
 	)
 	flags.BoolVarP(&opts.noCache, "no-cache", "n", false, "disable cache")
 
@@ -137,8 +137,9 @@ func subcommands(cmd *cobra.Command) []string {
 }
 
 type tagCounts struct {
-	Tags map[string]int `json:"tags"`
-	Hash uint64         `json:"hash"`
+	Tags  map[string]int `json:"tags"`
+	Hash  uint64         `json:"hash"`
+	Total int            `json:"total"`
 }
 
 // collectTags processes all note files concurrently and extracts tags from their
@@ -175,15 +176,18 @@ func collectTags(ns noteSet, ignoredTags set.Set[string]) tagCounts {
 	}()
 
 	m := make(map[string]int, est)
+	total := 0
 	for t := range ch {
 		if ignoredTags.Contains(t) {
 			continue
 		}
 		m[t]++
+		total++
 	}
 	return tagCounts{
-		Tags: m,
-		Hash: ns.hash,
+		Tags:  m,
+		Hash:  ns.hash,
+		Total: total,
 	}
 }
 
@@ -218,27 +222,38 @@ func (tc tagCounts) writeCache(root vaultPath) error {
 }
 
 func (tc tagCounts) Print(opts rootOptions) {
-	t := slices.SortedFunc(maps.Keys(tc.Tags), func(a, b string) int {
+	names := slices.SortedFunc(maps.Keys(tc.Tags), func(a, b string) int {
 		return tc.Tags[b] - tc.Tags[a]
 	})
 
 	var limit int
 	if opts.limit < 0 {
-		limit = len(t)
+		limit = len(names)
 	} else {
-		limit = min(len(t), opts.limit)
+		limit = min(len(names), opts.limit)
 	}
 
 	switch opts.displayMode {
 	case name:
 		for i := 0; i < limit; i++ {
-			fmt.Println(t[i])
+			name := names[i]
+			fmt.Println(name)
 		}
 	case count:
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		for i := 0; i < limit; i++ {
-			count := tc.Tags[t[i]]
-			fmt.Fprintf(w, "%d\t%s\n", count, t[i])
+			name := names[i]
+			count := tc.Tags[name]
+			fmt.Fprintf(w, "%d\t%s\n", count, name)
+		}
+		w.Flush()
+	case relative:
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		for i := 0; i < limit; i++ {
+			name := names[i]
+			count := tc.Tags[name]
+			freq := float64(count) / float64(tc.Total) * 100
+			fmt.Fprintf(w, "%.3f\t%s\n", freq, name)
 		}
 		w.Flush()
 	}
