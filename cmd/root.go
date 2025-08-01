@@ -201,6 +201,8 @@ func newTagCountsFromCache(root vaultPath) (tagCounts, error) {
 	if err != nil {
 		return tc, err
 	}
+	defer f.Close()
+
 	d := json.NewDecoder(f)
 	if err := d.Decode(&tc); err != nil {
 		return tc, err
@@ -309,6 +311,7 @@ func processFile(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
 	yml, err := extractFrontMatter(f)
 	if errors.Is(err, ErrEmptyFrontMatter) || errors.Is(err, ErrNoFrontMatter) {
