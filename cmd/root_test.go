@@ -595,3 +595,125 @@ func Test_tagCounts_writeCache(t *testing.T) {
 		})
 	}
 }
+
+func Test_tagCounts_fPrint_limit(t *testing.T) {
+	// Common test data sorted by count: rust(150), golang(100), python(50)
+	common := tagCounts{
+		Tags: map[string]int{
+			"golang": 100,
+			"rust":   150,
+			"python": 50,
+		},
+		Total: 300,
+	}
+
+	testCases := []struct {
+		name     string
+		tc       tagCounts
+		limit    int
+		expected string
+	}{
+		{
+			name:     "positive limit",
+			tc:       common,
+			limit:    2,
+			expected: "rust\ngolang\n",
+		},
+		{
+			name:     "zero limit shows all",
+			tc:       common,
+			limit:    0,
+			expected: "rust\ngolang\npython\n",
+		},
+		{
+			name:     "negative limit shows all",
+			tc:       common,
+			limit:    -1,
+			expected: "rust\ngolang\npython\n",
+		},
+		{
+			name:     "limit exceeds available tags",
+			tc:       common,
+			limit:    10,
+			expected: "rust\ngolang\npython\n",
+		},
+		{
+			name:     "limit equals available tags",
+			tc:       common,
+			limit:    3,
+			expected: "rust\ngolang\npython\n",
+		},
+		{
+			name: "empty tagCounts",
+			tc: tagCounts{
+				Tags:  map[string]int{},
+				Total: 0,
+			},
+			limit:    5,
+			expected: "",
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(*testing.T) {
+			var buf strings.Builder
+			opts := rootOptions{
+				limit:       tt.limit,
+				displayMode: name, // Use name mode for simplicity
+			}
+			tt.tc.fPrint(&buf, opts)
+
+			r.Equal(tt.expected, buf.String())
+		})
+	}
+}
+
+func Test_tagCounts_fPrint_displayMode(t *testing.T) {
+	tc := tagCounts{
+		Tags: map[string]int{
+			"rust":   150,
+			"golang": 100,
+			"python": 50,
+		},
+		Total: 300,
+	}
+
+	testCases := []struct {
+		name        string
+		displayMode displayMode
+		expected    string
+	}{
+		{
+			name:        "name mode",
+			displayMode: name,
+			expected:    "rust\ngolang\npython\n",
+		},
+		{
+			name:        "count mode",
+			displayMode: count,
+			expected:    "150  rust\n100  golang\n50   python\n",
+		},
+		{
+			name:        "relative mode",
+			displayMode: relative,
+			expected:    "50.000  rust\n33.333  golang\n16.667  python\n",
+		},
+	}
+
+	r := require.New(t)
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(*testing.T) {
+			var buf strings.Builder
+			opts := rootOptions{
+				limit:       -1, // Show all for display mode testing
+				displayMode: tt.displayMode,
+			}
+			tc.fPrint(&buf, opts)
+
+			r.Equal(tt.expected, buf.String())
+		})
+	}
+}

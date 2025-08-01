@@ -89,7 +89,7 @@ func NewRootCmd() *cobra.Command {
 				tc, err = newTagCountsFromCache(root)
 				// if cache is valid and no changes was detected, return it
 				if err == nil && tc.Hash == ns.hash {
-					tc.Print(opts)
+					tc.print(opts)
 					return nil
 				}
 			}
@@ -106,14 +106,14 @@ func NewRootCmd() *cobra.Command {
 				log.Printf("failed to write cache to %s: %v", root.cachePath(), err)
 			}
 
-			tc.Print(opts)
+			tc.print(opts)
 			return nil
 		},
 	}
 
 	flags := cmd.Flags()
 	flags.SortFlags = false
-	flags.IntVarP(&opts.limit, "limit", "l", 8, "number of tags to display. Negative values mean all.")
+	flags.IntVarP(&opts.limit, "limit", "l", 8, "number of tags to display. Non-positive values mean all.")
 	flags.VarP(
 		enumflag.New(&opts.displayMode, "mode", displayModeIDs, enumflag.EnumCaseSensitive),
 		"mode", "m", displayModeUsage(),
@@ -223,13 +223,17 @@ func (tc tagCounts) writeCache(root vaultPath) error {
 	return nil
 }
 
-func (tc tagCounts) Print(opts rootOptions) {
+func (tc tagCounts) print(opts rootOptions) {
+	tc.fPrint(os.Stdout, opts)
+}
+
+func (tc tagCounts) fPrint(w io.Writer, opts rootOptions) {
 	names := slices.SortedFunc(maps.Keys(tc.Tags), func(a, b string) int {
 		return tc.Tags[b] - tc.Tags[a]
 	})
 
 	var limit int
-	if opts.limit < 0 {
+	if opts.limit <= 0 {
 		limit = len(names)
 	} else {
 		limit = min(len(names), opts.limit)
@@ -239,10 +243,10 @@ func (tc tagCounts) Print(opts rootOptions) {
 	case name:
 		for i := 0; i < limit; i++ {
 			name := names[i]
-			fmt.Println(name)
+			fmt.Fprintln(w, name)
 		}
 	case count:
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		w := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for i := 0; i < limit; i++ {
 			name := names[i]
 			count := tc.Tags[name]
@@ -250,7 +254,7 @@ func (tc tagCounts) Print(opts rootOptions) {
 		}
 		w.Flush()
 	case relative:
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		w := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for i := 0; i < limit; i++ {
 			name := names[i]
 			count := tc.Tags[name]
