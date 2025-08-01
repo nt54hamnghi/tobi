@@ -96,7 +96,9 @@ func NewRootCmd() *cobra.Command {
 
 			// cache is disabled or cache file is stale, corrupted, or missing
 			// compute tag counts
-			tc = collectTags(ns, isIgnored)
+			tc = collectTags(ns, func(t string) bool {
+				return isIgnored.Contains(t)
+			})
 
 			// write computed tag counts to cache
 			if err := tc.writeCache(root); err != nil {
@@ -143,11 +145,11 @@ type tagCounts struct {
 }
 
 // collectTags processes all note files concurrently and extracts tags from their
-// YAML frontmatter, filtering out ignored tags and calculating frequency counts.
-// Returns a tagCounts struct with the frequency map and vault hash.
+// YAML frontmatter, filtering out tags using the provided ignoreFunc predicate.
+// Returns a tagCounts struct with the frequency map, vault hash, and total number of tags.
 //
 // Files that cannot be processed due to errors are logged and skipped.
-func collectTags(ns noteSet, ignoredTags set.Set[string]) tagCounts {
+func collectTags(ns noteSet, ignoreFunc func(string) bool) tagCounts {
 	var wg sync.WaitGroup
 
 	// estimated total number of tags based on number of notes
@@ -178,7 +180,7 @@ func collectTags(ns noteSet, ignoredTags set.Set[string]) tagCounts {
 	m := make(map[string]int, est)
 	total := 0
 	for t := range ch {
-		if ignoredTags.Contains(t) {
+		if ignoreFunc(t) {
 			continue
 		}
 		m[t]++

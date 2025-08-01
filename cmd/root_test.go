@@ -397,23 +397,29 @@ func Test_readIgnoredTags(t *testing.T) {
 }
 
 func Test_collectTags(t *testing.T) {
+	noIgnore := func(string) bool {
+		return false
+	}
+
 	testCases := []struct {
-		name        string
-		dir         *fs.Dir
-		ignoredTags set.Set[string]
-		want        map[string]int
+		name      string
+		dir       *fs.Dir
+		filter    func(string) bool
+		want      map[string]int
+		wantTotal int
 	}{
 		{
 			name: "single file",
 			dir: fs.NewDir(t, "test",
 				fs.WithFile("note1.md", "---\ntags: [golang, cobra, cli]\n---\nContent"),
 			),
-			ignoredTags: set.NewSet[string](),
+			filter: noIgnore,
 			want: map[string]int{
 				"golang": 1,
 				"cobra":  1,
 				"cli":    1,
 			},
+			wantTotal: 3,
 		},
 		{
 			name: "multiple files",
@@ -424,62 +430,64 @@ func Test_collectTags(t *testing.T) {
 					"note3.md": "---\ntags: [cobra]\n---\nContent",
 				}),
 			),
-			ignoredTags: set.NewSet[string](),
+			filter: noIgnore,
 			want: map[string]int{
 				"golang": 2,
 				"cobra":  2,
 				"cli":    1,
 			},
+			wantTotal: 5,
+		},
+		{
+			name: "remove hash prefix",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile("note1.md", "---\ntags: [\"#golang\", golang]\n---\nContent"),
+			),
+			filter: noIgnore,
+			want: map[string]int{
+				"golang": 2,
+			},
+			wantTotal: 2,
+		},
+		{
+			name: "with filter",
+			dir: fs.NewDir(t, "test",
+				fs.WithFile("note1.md", "---\ntags: [golang, daily]\n---\nContent"),
+			),
+			filter: func(s string) bool {
+				return s == "daily"
+			},
+			want: map[string]int{
+				"golang": 1,
+			},
+			wantTotal: 1,
 		},
 		{
 			name: "skip files with errors",
 			dir: fs.NewDir(t, "test",
-				fs.WithFiles(map[string]string{
-					"valid.md":   "---\ntags: [golang]\n---\nContent",
-					"invalid.md": "---\ntags: [invalid: yaml\n---\nContent", // Invalid YAML
-				}),
+				fs.WithFile("invalid.md", "---\ntags: [invalid: yaml\n---\nContent"),
 			),
-			ignoredTags: set.NewSet[string](),
-			want: map[string]int{
-				"golang": 1,
-			},
+			filter:    noIgnore, // shouldn't need this but include for completeness
+			want:      map[string]int{},
+			wantTotal: 0,
 		},
 		{
-			name: "ignored tags are filtered out",
-			dir: fs.NewDir(t, "test",
-				fs.WithFiles(map[string]string{
-					"note1.md": "---\ntags: [golang, cobra, daily]\n---\nContent",
-					"note2.md": "---\ntags: [golang, daily, personal]\n---\nContent",
-				}),
-			),
-			ignoredTags: set.NewSet("daily", "personal"),
-			want: map[string]int{
-				"golang": 2,
-				"cobra":  1,
-			},
-		},
-		{
-			name: "all tags ignored",
+			name: "ignore all tags",
 			dir: fs.NewDir(t, "test",
 				fs.WithFile("note1.md", "---\ntags: [daily, personal]\n---\nContent"),
 			),
-			ignoredTags: set.NewSet("daily", "personal"),
-			want:        map[string]int{},
-		},
-		{
-			name: "empty noteSet",
-			dir:  fs.NewDir(t, "test"),
-			want: map[string]int{},
-		},
-		{
-			name: "hash prefix removal",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile("note1.md", "---\ntags: [\"#golang\", golang]\n---\nContent"),
-			),
-			ignoredTags: set.NewSet[string](),
-			want: map[string]int{
-				"golang": 2,
+			filter: func(string) bool {
+				return true
 			},
+			want:      map[string]int{},
+			wantTotal: 0,
+		},
+		{
+			name:      "empty noteSet",
+			dir:       fs.NewDir(t, "test"),
+			filter:    noIgnore, // shouldn't need this but include for completeness
+			want:      map[string]int{},
+			wantTotal: 0,
 		},
 	}
 
@@ -496,10 +504,11 @@ func Test_collectTags(t *testing.T) {
 			r.NoError(err)
 
 			// Test collectTags
-			result := collectTags(ns, tt.ignoredTags)
+			result := collectTags(ns, tt.filter)
 
 			// Verify results
 			r.Equal(tt.want, result.Tags)
+			r.Equal(tt.wantTotal, result.Total)
 			r.Equal(ns.hash, result.Hash) // Hash should be preserved
 		})
 	}
@@ -556,9 +565,10 @@ func Test_tagCounts_writeCache(t *testing.T) {
 					"golang": 5,
 					"cobra":  3,
 				},
-				Hash: 12345678901234567890,
+				Hash:  12345678901234567890,
+				Total: 8,
 			},
-			wantJSON: "{\n\t\"tags\": {\n\t\t\"cobra\": 3,\n\t\t\"golang\": 5\n\t},\n\t\"hash\": 12345678901234567890\n}\n",
+			wantJSON: "{\n\t\"tags\": {\n\t\t\"cobra\": 3,\n\t\t\"golang\": 5\n\t},\n\t\"hash\": 12345678901234567890,\n\t\"total\": 8\n}\n",
 		},
 	}
 
