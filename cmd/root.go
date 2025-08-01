@@ -21,6 +21,7 @@ import (
 	set "github.com/deckarep/golang-set/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/nt54hamnghi/tobi/pkg/gitignore"
+	"github.com/nt54hamnghi/tobi/pkg/tagignore"
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 )
@@ -72,7 +73,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			isIgnored, err := loadIgnoredTags(root)
+			isIgnored, err := tagignore.NewTagGlobs(root.ignorePath())
 			if err != nil {
 				return err
 			}
@@ -96,9 +97,7 @@ func NewRootCmd() *cobra.Command {
 
 			// cache is disabled or cache file is stale, corrupted, or missing
 			// compute tag counts
-			tc = collectTags(ns, func(t string) bool {
-				return isIgnored.Contains(t)
-			})
+			tc = collectTags(ns, isIgnored.Match)
 
 			// write computed tag counts to cache
 			if err := tc.writeCache(root); err != nil {
@@ -265,41 +264,6 @@ func (tc tagCounts) fPrint(w io.Writer, opts rootOptions) {
 		}
 		w.Flush()
 	}
-}
-
-// loadIgnoredTags reads the '.tobiignore' file at root directory, which contains
-// tag names to ignore, one per line. Empty lines are skipped and duplicate entries
-// are removed.
-//
-// Returns an empty set if the file doesn't exist or cannot be read due to permissions.
-//
-// Returns an error for other file system issues.
-func loadIgnoredTags(root vaultPath) (set.Set[string], error) {
-	lines := set.NewSet[string]()
-	ignoreFile := root.ignorePath()
-
-	b, err := os.ReadFile(ignoreFile)
-	if err != nil {
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			return lines, nil
-		case errors.Is(err, fs.ErrPermission):
-			log.Printf("permission denied to read %s", ignoreFile)
-			return lines, nil
-		default:
-			return nil, err
-		}
-	}
-
-	for l := range strings.Lines(string(b)) {
-		l = strings.TrimSuffix(l, "\n")
-		if l == "" {
-			continue
-		}
-		lines.Add(l)
-	}
-
-	return lines, nil
 }
 
 // processFile opens a file and extracts tags from its YAML frontmatter.
