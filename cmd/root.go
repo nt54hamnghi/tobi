@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -14,14 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
-	"sync"
 	"text/tabwriter"
 
 	set "github.com/deckarep/golang-set/v2"
-	"github.com/goccy/go-yaml"
 	"github.com/nt54hamnghi/tobi/pkg/gitignore"
+	"github.com/nt54hamnghi/tobi/pkg/tagextract"
 	"github.com/nt54hamnghi/tobi/pkg/tagignore"
+	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 )
@@ -149,47 +146,54 @@ type tagCounts struct {
 //
 // Files that cannot be processed due to errors are logged and skipped.
 func collectTags(ns noteSet, ignoreFunc func(string) bool) tagCounts {
-	var wg sync.WaitGroup
+	tc := tagCounts{
+		Hash: ns.hash,
+	}
 
-	// estimated total number of tags based on number of notes
-	est := ns.notes.Cardinality() * 8
-	// channel of tags to be collected
-	ch := make(chan string, est)
+	nsLen := ns.notes.Cardinality()
+	if nsLen == 0 {
+		return tc
+	}
+
+	p := pool.NewWithResults[[]string]().WithMaxGoroutines(nsLen)
 
 	for n := range set.Elements(ns.notes) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			tags, err := processFile(n)
+		p.Go(func() []string {
+			f, err := os.ReadFile(n)
 			if err != nil {
-				log.Printf("failed to process file %s: %v", n, err)
-				return
+				log.Printf("failed to open file %s: %v", n, err)
+				return nil
 			}
-			for _, t := range tags {
-				ch <- t
+
+			tags, err := tagextract.Extract(string(f))
+			if err != nil {
+				log.Printf("failed to extract tags from file %s: %v", n, err)
+				return nil
 			}
-		}()
+
+			return tags
+		})
 	}
 
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
+	res := p.Wait()
 
-	m := make(map[string]int, est)
+	// estimated total number of tags based on number of notes
+	m := make(map[string]int, nsLen*8)
 	total := 0
-	for t := range ch {
-		if ignoreFunc(t) {
-			continue
+	for _, tags := range res {
+		for _, t := range tags {
+			if ignoreFunc(t) {
+				continue
+			}
+			m[t]++
+			total++
 		}
-		m[t]++
-		total++
 	}
-	return tagCounts{
-		Tags:  m,
-		Hash:  ns.hash,
-		Total: total,
-	}
+
+	tc.Tags = m
+	tc.Total = total
+
+	return tc
 }
 
 func newTagCountsFromCache(root vaultPath) (tagCounts, error) {
@@ -264,102 +268,6 @@ func (tc tagCounts) fPrint(w io.Writer, opts rootOptions) {
 		}
 		w.Flush()
 	}
-}
-
-// processFile opens a file and extracts tags from its YAML frontmatter.
-// Returns nil (without error) if the file has no frontmatter or empty frontmatter.
-//
-// Returns an error if the file cannot be opened, frontmatter is invalid, or YAML parsing fails.
-func processFile(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	yml, err := extractFrontMatter(f)
-	if errors.Is(err, ErrEmptyFrontMatter) || errors.Is(err, ErrNoFrontMatter) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return extractTagsFromYAML([]byte(yml))
-}
-
-var (
-	ErrInvalidFrontMatter = errors.New("invalid frontmatter")
-	ErrEmptyFrontMatter   = errors.New("empty frontmatter")
-	ErrNoFrontMatter      = errors.New("no frontmatter")
-)
-
-// extractFrontMatter reads from the given reader and extracts YAML frontmatter
-// content enclosed between '---' delimiters, returning the frontmatter as a string.
-//
-// Returns an error if delimiters are missing or frontmatter is empty.
-func extractFrontMatter(r io.Reader) (string, error) {
-	sep := "---"
-
-	scanner := bufio.NewScanner(r)
-	if scanner.Scan() {
-		t := scanner.Text()
-		if !strings.HasPrefix(t, sep) {
-			return "", ErrNoFrontMatter
-		}
-		if t != sep {
-			return "", ErrInvalidFrontMatter
-		}
-	}
-
-	var (
-		s   strings.Builder
-		end bool
-	)
-
-	for scanner.Scan() {
-		t := scanner.Text()
-		if t == sep {
-			end = true
-			break
-		}
-		s.WriteString(t + "\n")
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-
-	if !end {
-		return "", ErrInvalidFrontMatter
-	}
-
-	yml := strings.TrimSpace(s.String())
-	if len(yml) == 0 {
-		return "", ErrEmptyFrontMatter
-	}
-
-	return yml, nil
-}
-
-// extractTagsFromYAML parses YAML frontmatter data and extracts the "tags" field,
-// returning the tags as a slice of strings.
-//
-// Returns an error if the YAML is invalid.
-func extractTagsFromYAML(data []byte) ([]string, error) {
-	var fm struct {
-		Tags []string `yaml:"tags"`
-	}
-
-	if err := yaml.Unmarshal(data, &fm); err != nil {
-		return nil, err
-	}
-
-	for i := range fm.Tags {
-		fm.Tags[i] = strings.TrimPrefix(fm.Tags[i], "#")
-	}
-
-	return fm.Tags, nil
 }
 
 // vaultPath is a path to a valid directory.

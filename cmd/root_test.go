@@ -12,86 +12,6 @@ import (
 	"gotest.tools/v3/fs"
 )
 
-func Test_extractFrontMatter(t *testing.T) {
-	testCases := []struct {
-		name     string
-		input    string
-		expected string
-		wantErr  error
-	}{
-		{
-			name:     "valid frontmatter",
-			input:    "---\ntags: [one, two]\n---\nContent here",
-			expected: "tags: [one, two]",
-			wantErr:  nil,
-		},
-		{
-			name:     "multiple separators",
-			input:    "---\ntags: [one, two]\n---\nContent with\n---More content\n---",
-			expected: `tags: [one, two]`,
-			wantErr:  nil,
-		},
-		{
-			name:     "whitespace in frontmatter",
-			input:    "---\n\ntags: [one, two]\n\n---\n",
-			expected: "tags: [one, two]",
-			wantErr:  nil,
-		},
-		{
-			name:    "empty frontmatter",
-			input:   "---\n---\nContent here",
-			wantErr: ErrEmptyFrontMatter,
-		},
-		{
-			name:    "no frontmatter",
-			input:   "Content here",
-			wantErr: ErrNoFrontMatter,
-		},
-		{
-			name:    "no closing delimiter",
-			input:   "---\ntags: [test]",
-			wantErr: ErrInvalidFrontMatter,
-		},
-		{
-			name:    "no opening delimiter",
-			input:   "tags: [test]---",
-			wantErr: ErrNoFrontMatter,
-		},
-		{
-			name:    "no new line after opening delimiter",
-			input:   "---tags: [test]\n---\n",
-			wantErr: ErrInvalidFrontMatter,
-		},
-		{
-			name:     "no new line after closing delimiter",
-			input:    "---\ntags: [test]\n---",
-			expected: "tags: [test]",
-			wantErr:  nil,
-		},
-		{
-			name:     "whitespace around delimiters",
-			input:    "\n---\ntags: [one, two]\n---\n",
-			expected: "tags: [one, two]",
-			wantErr:  ErrNoFrontMatter,
-		},
-	}
-
-	r := require.New(t)
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(_ *testing.T) {
-			actual, err := extractFrontMatter(strings.NewReader(tt.input))
-
-			if tt.wantErr != nil {
-				r.ErrorIs(err, tt.wantErr)
-			} else {
-				r.NoError(err)
-				r.Equal(tt.expected, actual)
-			}
-		})
-	}
-}
-
 func Test_listNotes(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -242,95 +162,6 @@ func Test_listNotes(t *testing.T) {
 	}
 }
 
-func Test_processFile(t *testing.T) {
-	testCases := []struct {
-		name    string
-		dir     *fs.Dir
-		want    []string
-		wantErr bool
-	}{
-		{
-			name: "valid frontmatter with tags",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\ntags: [golang, \"#cobra\"]\n---\nContent",
-				),
-			),
-			want: []string{"golang", "cobra"},
-		},
-		{
-			name: "no tags field",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\ntitle: Test\n---\nContent",
-				),
-			),
-			want: nil,
-		},
-		{
-			name: "empty tags array",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\ntags: []\n---\nContent",
-				),
-			),
-			want: []string{},
-		},
-		{
-			name: "no frontmatter",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "# Just content",
-				),
-			),
-			want: nil,
-		},
-		{
-			name: "empty frontmatter",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\n---\nContent",
-				),
-			),
-			want: nil,
-		},
-		{
-			name: "invalid frontmatter",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\ntags: [test]\nNo closing delimiter",
-				),
-			),
-			wantErr: true,
-		},
-		{
-			name: "invalid YAML",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile(
-					"note.md", "---\ntags: [invalid: yaml\n---\nContent",
-				),
-			),
-			wantErr: true,
-		},
-	}
-
-	r := require.New(t)
-
-	for _, tt := range testCases {
-		defer tt.dir.Remove()
-
-		t.Run(tt.name, func(_ *testing.T) {
-			actual, err := processFile(filepath.Join(tt.dir.Path(), "note.md"))
-			if tt.wantErr {
-				r.Error(err)
-				return
-			}
-			r.NoError(err)
-			r.Equal(tt.want, actual)
-		})
-	}
-}
-
 func Test_collectTags(t *testing.T) {
 	noIgnore := func(string) bool {
 		return false
@@ -346,7 +177,7 @@ func Test_collectTags(t *testing.T) {
 		{
 			name: "single file",
 			dir: fs.NewDir(t, "test",
-				fs.WithFile("note1.md", "---\ntags: [golang, cobra, cli]\n---\nContent"),
+				fs.WithFile("note1.md", "---\ntags: [golang, cobra]\n---\nContent #cli"),
 			),
 			filter: noIgnore,
 			want: map[string]int{
@@ -361,7 +192,7 @@ func Test_collectTags(t *testing.T) {
 			dir: fs.NewDir(t, "test",
 				fs.WithFiles(map[string]string{
 					"note1.md": "---\ntags: [golang, cobra]\n---\nContent",
-					"note2.md": "---\ntags: [golang, cli]\n---\nContent",
+					"note2.md": "Content #cli #golang",
 					"note3.md": "---\ntags: [cobra]\n---\nContent",
 				}),
 			),
@@ -374,20 +205,12 @@ func Test_collectTags(t *testing.T) {
 			wantTotal: 5,
 		},
 		{
-			name: "remove hash prefix",
-			dir: fs.NewDir(t, "test",
-				fs.WithFile("note1.md", "---\ntags: [\"#golang\", golang]\n---\nContent"),
-			),
-			filter: noIgnore,
-			want: map[string]int{
-				"golang": 2,
-			},
-			wantTotal: 2,
-		},
-		{
 			name: "with filter",
 			dir: fs.NewDir(t, "test",
-				fs.WithFile("note1.md", "---\ntags: [golang, daily]\n---\nContent"),
+				fs.WithFiles(map[string]string{
+					"note1.md": "Content #daily #golang",
+					"note2.md": "---\ntags: [daily]\n---\nContent",
+				}),
 			),
 			filter: func(s string) bool {
 				return s == "daily"
@@ -421,7 +244,7 @@ func Test_collectTags(t *testing.T) {
 			name:      "empty noteSet",
 			dir:       fs.NewDir(t, "test"),
 			filter:    noIgnore, // shouldn't need this but include for completeness
-			want:      map[string]int{},
+			want:      nil,
 			wantTotal: 0,
 		},
 	}

@@ -14,12 +14,12 @@ test:
     # -shuffle=on - shuffle tests to catch flakiness
     # -cover - show test coverage
     # -covermode=atomic - thread-safe coverage for race testing
-    @go test ./... -count=2 -race -shuffle=on -cover -covermode=atomic
+    @go test ./cmd/... ./pkg/... -count=2 -race -shuffle=on -cover -covermode=atomic
 
 alias t := test
 
 lint:
-    @golangci-lint run ./...
+    @golangci-lint run ./cmd/... ./pkg/...
 
 alias l := lint
 
