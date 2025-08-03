@@ -29,12 +29,12 @@ func (tg *TagGlobs) Match(tag string) bool {
 	return false
 }
 
-// NewTagGlobs creates a new TagGlobs instance by reading ignore patterns from
+// NewTagGlobs creates a new TagGlobs instance by reading exclude patterns from
 // the specified file path and compiling them into glob patterns.
 //
 // Returns an error if the file cannot be read or any glob pattern fails to compile.
 func NewTagGlobs(path string) (TagGlobs, error) {
-	lines, err := readIgnorePatterns(path)
+	lines, err := readExcludePatterns(path)
 	if err != nil {
 		return TagGlobs{}, err
 	}
@@ -52,13 +52,13 @@ func NewTagGlobs(path string) (TagGlobs, error) {
 	return TagGlobs{Globs: globs}, nil
 }
 
-// readIgnorePatterns reads lines from the specified file path.
+// readExcludePatterns reads lines from the specified file path.
 // Lines starting with '#' are treated as comments and ignored.
 //
 // Returns a set of non-empty, non-comment, and deduplicated lines.
 //
 // Returns an empty set without error if the file doesn't exist or lacks read permissions.
-func readIgnorePatterns(path string) (set.Set[string], error) {
+func readExcludePatterns(path string) (set.Set[string], error) {
 	lines := set.NewSet[string]()
 
 	f, err := os.Open(path)

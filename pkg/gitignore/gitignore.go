@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	commentPrefix = "#"
-	gitDir        = ".git"
-	gitignoreFile = ".gitignore"
+	commentPrefix  = "#"
+	gitDir         = ".git"
+	gitignoreFile  = ".gitignore"
+	tobiignoreFile = ".tobiignore"
 )
 
 // .git/info/exclude
@@ -41,10 +42,10 @@ func (m *RepoRootMatcher) MatchFile(path AbsolutePath) bool {
 
 // ReadPatterns reads gitignore patterns from the repository, starting with
 // .git/info/exclude at the repository root, then recursively traversing the
-// directory structure to read all .gitignore files.
+// directory structure to read all .gitignore and .tobiignore files.
 //
 // Patterns are returned in ascending order of priority (last higher), with
-// nested .gitignore files overriding parent patterns. Nested .git folders
+// nested .gitignore and .tobiignore files overriding parent patterns. Nested .git folders
 // are not supported.
 func ReadPatterns(root AbsolutePath) ([]gitignore.Pattern, error) {
 	// load patterns from .git/info/exclude
@@ -69,7 +70,9 @@ func ReadPatterns(root AbsolutePath) ([]gitignore.Pattern, error) {
 			}
 		}
 
-		if d.Type().IsRegular() && d.Name() == gitignoreFile {
+		// files are walked in lexical order, so .tobiignore files override .gitignore files
+		// TODO: test this assumption
+		if d.Type().IsRegular() && (d.Name() == gitignoreFile || d.Name() == tobiignoreFile) {
 			// Since root is absolute when we pass it to WalkDir, path is absolute.
 			// It's safe to construct AbsolutePath directly from path.
 			p := NewAbsolutePathUnchecked(path)

@@ -62,16 +62,16 @@ func TestLoadPatterns(t *testing.T) {
 			dir = fs.NewDir(t, "test")
 		} else {
 			dir = fs.NewDir(t, "test",
-				fs.WithFile(".tobiignore", tt.fileContent),
+				fs.WithFile(".tobi.exclude", tt.fileContent),
 			)
 		}
 
 		defer dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			root := dir.Join(".tobiignore")
+			root := dir.Join(".tobi.exclude")
 
-			actual, err := readIgnorePatterns(root)
+			actual, err := readExcludePatterns(root)
 			r.NoError(err)
 
 			r.Equal(tt.want, set.Sorted(actual))
@@ -151,14 +151,14 @@ func TestTagGlobs(t *testing.T) {
 			dir = fs.NewDir(t, "test")
 		} else {
 			dir = fs.NewDir(t, "test",
-				fs.WithFile(".tobiignore", tt.fileContent),
+				fs.WithFile(".tobi.exclude", tt.fileContent),
 			)
 		}
 		defer dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			ignorePath := dir.Join(".tobiignore")
-			tg, err := NewTagGlobs(ignorePath)
+			excludePath := dir.Join(".tobi.exclude")
+			tg, err := NewTagGlobs(excludePath)
 
 			r.NoError(err)
 			r.Len(tg.Globs, tt.wantGlobs)
@@ -190,13 +190,13 @@ func TestTagGlobs_ErrorCases(t *testing.T) {
 
 	for _, tt := range testCases {
 		dir := fs.NewDir(t, "test",
-			fs.WithFile(".tobiignore", tt.fileContent),
+			fs.WithFile(".tobi.exclude", tt.fileContent),
 		)
 		defer dir.Remove()
 
 		t.Run(tt.name, func(_ *testing.T) {
-			ignorePath := dir.Join(".tobiignore")
-			_, err := NewTagGlobs(ignorePath)
+			excludePath := dir.Join(".tobi.exclude")
+			_, err := NewTagGlobs(excludePath)
 			r.Error(err)
 		})
 	}

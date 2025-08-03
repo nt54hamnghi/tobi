@@ -69,7 +69,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			isIgnored, err := tagx.NewTagGlobs(root.ignorePath())
+			isIgnored, err := tagx.NewTagGlobs(root.excludePath())
 			if err != nil {
 				return err
 			}
@@ -287,8 +287,8 @@ func (v vaultPath) String() string {
 	return string(v)
 }
 
-func (v vaultPath) ignorePath() string {
-	return filepath.Join(v.String(), ".tobiignore")
+func (v vaultPath) excludePath() string {
+	return filepath.Join(v.String(), ".tobi.exclude")
 }
 
 func (v vaultPath) cachePath() string {
