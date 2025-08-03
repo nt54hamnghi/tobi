@@ -16,8 +16,7 @@ import (
 
 	set "github.com/deckarep/golang-set/v2"
 	"github.com/nt54hamnghi/tobi/pkg/gitignore"
-	"github.com/nt54hamnghi/tobi/pkg/tagextract"
-	"github.com/nt54hamnghi/tobi/pkg/tagignore"
+	"github.com/nt54hamnghi/tobi/pkg/tagx"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
@@ -70,7 +69,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			isIgnored, err := tagignore.NewTagGlobs(root.ignorePath())
+			isIgnored, err := tagx.NewTagGlobs(root.ignorePath())
 			if err != nil {
 				return err
 			}
@@ -165,7 +164,7 @@ func collectTags(ns noteSet, ignoreFunc func(string) bool) tagCounts {
 				return nil
 			}
 
-			tags, err := tagextract.Extract(string(f))
+			tags, err := tagx.Extract(string(f))
 			if err != nil {
 				log.Printf("failed to extract tags from file %s: %v", n, err)
 				return nil

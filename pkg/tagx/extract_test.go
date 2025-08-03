@@ -1,4 +1,4 @@
-package tagextract
+package tagx
 
 import (
 	"slices"

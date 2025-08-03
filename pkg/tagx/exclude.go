@@ -1,4 +1,4 @@
-package tagignore
+package tagx
 
 import (
 	"bufio"
