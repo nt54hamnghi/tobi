@@ -11,11 +11,11 @@
 
 ## Screenshots
 
-<div align="center">
-  <img src="./imgs/mode-name.png" alt="Name mode" width="300" height="150" />
-  <img src="./imgs/mode-count.png" alt="Count mode" width="300" height="150" />
-  <img src="./imgs/mode-relative.png" alt="Relative mode" width="300" height="150" />
-</div>
+<img src="./imgs/mode-name.png" alt="Name mode" width="300" height="150" />
+
+<img src="./imgs/mode-count.png" alt="Count mode" width="300" height="150" />
+
+<img src="./imgs/mode-relative.png" alt="Relative mode" width="300" height="150" />
 
 ## Installation
 
