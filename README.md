@@ -9,6 +9,14 @@
 - **Flexible output modes**: show only tag names, or with counts, or with relative frequency percentages.
 - **Per‑vault tag excludes**: ignore tags via glob patterns in `.tobi.exclude`.
 
+## Screenshots
+
+<div align="center">
+  <img src="./imgs/mode-name.png" alt="Name mode" width="300" height="150" />
+  <img src="./imgs/mode-count.png" alt="Count mode" width="300" height="150" />
+  <img src="./imgs/mode-relative.png" alt="Relative mode" width="300" height="150" />
+</div>
+
 ## Installation
 
 [Make sure Go is installed](https://go.dev/doc/install) before running the following command:
@@ -52,6 +60,10 @@ tobi . --mode relative
 # Force a fresh scan (ignore cache)
 tobi . --no-cache
 ```
+
+### Caching
+
+By default, `tobi` caches results in `.tobi.json` at your vault root. The cache is invalidated when files are added, removed, or modified. Use `--no-cache` to force a fresh scan and bypass the cache entirely.
 
 ### `.gitignore` and `.tobiignore`
 
